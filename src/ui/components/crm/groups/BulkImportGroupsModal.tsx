@@ -259,6 +259,7 @@ export default function BulkImportGroupsModal({ pageId, onClose, onImported }: B
               pageId,
               cookie: acc.cookies,
               imei: acc.imei,
+              userAgent: acc.user_agent,
               groupId: numericGroupId,
             });
 

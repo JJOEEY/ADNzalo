@@ -66,6 +66,7 @@ export function usePremiumMemberSync({
         pageId: accountId,
         cookie: acc.cookies,
         imei: acc.imei,
+        userAgent: acc.user_agent,
         groupId,
       });
 
@@ -127,7 +128,7 @@ export async function syncAllGroups(params: {
     const groupName = groupNames?.[groupId] || groupId;
     onProgress?.({ index: i + 1, total: groupIds.length, groupId, groupName });
     try {
-      const result = await scanGroupViaBackend({ pageId: accountId, cookie: acc.cookies, imei: acc.imei, groupId });
+      const result = await scanGroupViaBackend({ pageId: accountId, cookie: acc.cookies, imei: acc.imei, userAgent: acc.user_agent, groupId });
       if (result?.success && result.members && result.members.length > 0) {
         await DataAccessor.saveGroupMembers({
           zaloId: accountId,

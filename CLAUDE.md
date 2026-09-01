@@ -54,15 +54,17 @@ Mục đích: quét thành viên ẩn trong nhóm Zalo thông qua `zca-js` phía
 ```bash
 cd server/adn-scan-backend
 npm install
+# copy .env.example thành .env rồi điền SECRET_KEY thật
 ```
 
 ### 2. Cấu hình
 Tạo `.env`:
 ```env
-SECRET_KEY=fb7457b7a39bdc9e742f08b657a8059a5e6a8fda6e32bfe0bfecf37eadf519eb
+SECRET_KEY=<SECRET_KEY>
 PORT=3000
 ```
-> `SECRET_KEY` phải trùng với `src/ui/lib/backendService.ts:17`.
+> Không commit khóa thật. `SECRET_KEY` phải trùng khóa cấu hình của app.
+> `server.js` nạp `.env` qua `dotenv`; production nên đặt file env ngoài thư mục repo hoặc dùng `EnvironmentFile` của systemd.
 
 ### 3. Chạy
 ```bash
@@ -75,27 +77,44 @@ server {
     listen 443 ssl;
     server_name adncapital.com.vn;
 
-    location /api/ {
-        proxy_pass http://127.0.0.1:3000/api/;
+    # Chỉ proxy các route của scan backend; không chiếm toàn bộ /api/ của ADN.
+    location = /api/health {
+        proxy_pass http://127.0.0.1:3000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
-    # Các route khác (web, landing) để nguyên hoặc proxy khác
+    location = /api/scan/group {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location = /api/scan/premium-status {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # Các route khác của web/landing/API ADN để nguyên.
 }
 ```
 
 ### 5. Health check
 ```bash
-curl https://adncapital.com.vn/health
+curl https://adncapital.com.vn/api/health
 # → {"ok": true}
 ```
+> Vì domain đang có landing/web app, route health nên kiểm tra tại `https://adncapital.com.vn/api/health`.
 
 ### 6. Test quét ẩn
 ```bash
 curl -X POST https://adncapital.com.vn/api/scan/group \
   -H "Content-Type: application/json" \
-  -H "x-api-key: fb7457b7a39bdc9e742f08b657a8059a5e6a8fda6e32bfe0bfecf37eadf519eb" \
+  -H "x-api-key: <SECRET_KEY>" \
   -d '{"page_id":"YOUR_PAGE_ID","body":"<AES_ENCRYPTED_PAYLOAD>"}'
 ```
 
@@ -108,6 +127,7 @@ curl -X POST https://adncapital.com.vn/api/scan/group \
 - **FALLBACK**: `https://deplaoapp.com` (server Deplao — dùng tạm khi ADN chưa deploy)
 
 Khi ADN backend đã deploy hoạt động, fallback tự động ngưng được sử dụng.
+Không xóa fallback trước khi `https://adncapital.com.vn/api/health` trả HTTP 200 và test scan bằng tài khoản thật thành công.
 
 ---
 
@@ -117,7 +137,9 @@ Khi ADN backend đã deploy hoạt động, fallback tự động ngưng đượ
 2. **x-api-key** — mọi request backend phải có header này, giá trị = `SECRET_KEY`.
 3. **Rate limit** — 60 req/phút/IP.
 4. **Cookie/IMEI** — chỉ truyền qua AES-128-CBC mã hóa, không lưu trữ vĩnh viễn.
-5. **Nginx** — chỉ proxy `/api/`, không mở port 3000 ra internet.
+5. **Nginx** — chỉ proxy các route scan cụ thể, không mở port 3000 ra internet.
+6. **Quyền Zalo** — backend không nâng quyền tài khoản; danh sách đầy đủ chỉ trả được khi cookie đăng nhập có quyền và API Zalo cho phép.
+7. **Không tự bật link nhóm** — nếu invite link bị tắt, báo giới hạn quyền thay vì thay đổi cài đặt nhóm.
 
 ---
 
@@ -138,7 +160,7 @@ Khi ADN backend đã deploy hoạt động, fallback tự động ngưng đượ
 
 1. Thay đổi code → `npm run build:renderer` → test local
 2. Build Electron → `electron-builder --publish never` → test `.exe`
-3. Deploy backend → `server/adn-scan-backend/` → nginx → test `curl /health`
+3. Deploy backend → `server/adn-scan-backend/` → nginx → test `curl /api/health`
 4. Commit → đẩy `origin/main` trên `JJOEEY/ADNzalo`
 5. Đọc `CLAUDE.md` này trước khi deploy để đảm bảo đúng quy trình
 
@@ -156,7 +178,7 @@ Khi ADN backend đã deploy hoạt động, fallback tự động ngưng đượ
 A: `adncapital.com.vn` là backend ADN (mục tiêu), `deplaoapp.com` là fallback tạm khi ADN chưa deploy.
 
 **Q: Quét ẩn có cần backend không?**
-A: Có — `getGroupInfo` cục bộ chỉ trả trưởng/phó. Backend dùng `zca-js` paginate `getGroupLinkInfo` mới lấy được full.
+A: Backend chỉ giúp chạy API ngoài Electron và paginate `getGroupLinkInfo`; domain không tự cấp quyền. Nếu group link tắt hoặc tài khoản không có quyền xem danh sách, backend cũng không thể lấy thành viên bị Zalo giới hạn.
 
 **Q: Khác gì với dự án Deplao?**
 A: ADNzalo fork từ deplao-builder nhưng đã đổi hoàn toàn domain, palette, chức năng. Deplao chỉ là upstream để sync, không ảnh hưởng.

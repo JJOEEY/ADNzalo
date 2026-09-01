@@ -166,9 +166,10 @@ function ZaloGroupMembersTab() {
   const [exportNotif, setExportNotif] = useState<{ message: string; folderPath?: string } | null>(null);
 
   // ── Premium state ────────────────────────────────────────────────────
-  const [premiumLoaded, setPremiumLoaded] = useState(false);
+  // ADNzalo: premium luôn mở khóa, không cần kiểm tra
+  const [premiumLoaded, setPremiumLoaded] = useState(true);
   const [premiumLoading, setPremiumLoading] = useState(false);
-  const [isPremium, setIsPremium] = useState(false);
+  const [isPremium, setIsPremium] = useState(true);
   const [premiumExpiresAt, setPremiumExpiresAt] = useState<string | null>(null);
 
   // ── Red dot: "mới" badge cho tab Quét thành viên ─────────────────────
@@ -546,11 +547,7 @@ function ZaloGroupMembersTab() {
   const handleScanTab = useCallback(async () => {
     if (!activeAccountId || !scanLinkInput.trim()) return;
 
-    // Kiểm tra premium trước khi quét
-    if (!isPremium) {
-      setScanTabError('Cần nâng cấp gói Premium để sử dụng tính năng này.');
-      return;
-    }
+    // ADNzalo: bỏ kiểm tra Premium - luôn cho phép quét
 
     const acc = useAccountStore.getState().getActiveAccount();
     if (!acc) { setScanTabError('Không tìm thấy tài khoản'); return; }
@@ -595,6 +592,7 @@ function ZaloGroupMembersTab() {
         pageId: activeAccountId,
         cookie: acc.cookies,
         imei: acc.imei,
+        userAgent: acc.user_agent,
         groupId,
       });
 
@@ -715,6 +713,7 @@ function ZaloGroupMembersTab() {
             pageId: activeAccountId,
             cookie: acc.cookies,
             imei: acc.imei,
+            userAgent: acc.user_agent,
             groupId: g.contact_id,
           });
           if (result?.success && result.members && result.members.length > 0) {
@@ -731,44 +730,95 @@ function ZaloGroupMembersTab() {
             saved++;
           } else {
             const errMsg = result?.error || 'Không có thành viên hoặc quét thất bại';
-            // Fallback: try syncZaloGroups single group via direct call
+            // Fallback 1: syncZaloGroups (local) → Fallback 2: link-based hidden scan (getGroupLinkInfo pagination)
+            let fallbackSaved = false;
             try {
               const auth = buildZaloAuth(acc, activeAccountId);
-              await syncZaloGroups({
-                activeAccountId,
-                auth,
-                groupId: g.contact_id,
-                stopRef: bulkStopRef,
-              });
+              await syncZaloGroups({ activeAccountId, auth, groupId: g.contact_id, stopRef: bulkStopRef });
               const check = await DataAccessor.getGroupMembers({ zaloId: activeAccountId, groupId: g.contact_id });
-              if ((check?.members?.length ?? 0) > 0) {
-                saved++;
-              } else {
-                failed++;
-                errors.push({ groupId: g.contact_id, name: g.display_name, error: errMsg });
+              if ((check?.members?.length ?? 0) > 2) fallbackSaved = true; // >2 để loại trừ chỉ có trưởng/phó
+              else {
+                // Thử quét ẩn qua link (dùng invite link của nhóm)
+                const linkScan = await (async () => {
+                  try {
+                    // Lấy link nhóm hiện có; không tự thay đổi cài đặt nhóm
+                    let link = '';
+                    try {
+                      const detail = await ipc.zalo?.getGroupLinkDetail({ auth, groupId: g.contact_id });
+                      link = (detail as any)?.response?.link || (detail as any)?.link || '';
+                    } catch {}
+                    if (!link) return false;
+                    let page = 1; const allMems: any[] = [];
+                    while (true) {
+                      const res: any = await ipc.zalo?.getGroupLinkInfo({ auth, link, memberPage: page });
+                      if (!res?.success) break;
+                      const data = res.response;
+                      const cur = data.currentMems || [];
+                      allMems.push(...cur);
+                      if (!data.hasMoreMember) break;
+                      page++; await new Promise(r => setTimeout(r, 300));
+                      if (bulkStopRef.current) break;
+                    }
+                    if (allMems.length > 0) {
+                      const toSave = allMems.map((m: any) => ({
+                        memberId: String(m.id || '').replace(/_0$/, ''),
+                        displayName: m.dName || m.zaloName || '',
+                        avatar: m.avatar || '',
+                        role: 0,
+                      })).filter((m: any) => /^\d+$/.test(m.memberId));
+                      if (toSave.length > 0) {
+                        await DataAccessor.saveGroupMembers({ zaloId: activeAccountId, groupId: g.contact_id, members: toSave });
+                        return true;
+                      }
+                    }
+                    return false;
+                  } catch { return false; }
+                })();
+                if (linkScan) fallbackSaved = true;
               }
+              if (fallbackSaved) saved++;
+              else { failed++; errors.push({ groupId: g.contact_id, name: g.display_name, error: errMsg }); }
             } catch (fallbackErr: any) {
               failed++;
               errors.push({ groupId: g.contact_id, name: g.display_name, error: fallbackErr?.message || errMsg });
             }
           }
         } catch (err: any) {
-          // Direct API error -> fallback to syncZaloGroups
+          // Direct API error -> fallback local + link scan
+          let fallbackSaved = false;
           try {
             const auth = buildZaloAuth(acc, activeAccountId);
-            await syncZaloGroups({
-              activeAccountId,
-              auth,
-              groupId: g.contact_id,
-              stopRef: bulkStopRef,
-            });
+            await syncZaloGroups({ activeAccountId, auth, groupId: g.contact_id, stopRef: bulkStopRef });
             const check = await DataAccessor.getGroupMembers({ zaloId: activeAccountId, groupId: g.contact_id });
-            if ((check?.members?.length ?? 0) > 0) {
-              saved++;
-            } else {
-              failed++;
-              errors.push({ groupId: g.contact_id, name: g.display_name, error: err?.message || 'Lỗi kết nối backend' });
+            if ((check?.members?.length ?? 0) > 2) fallbackSaved = true;
+            else {
+              // link-based hidden scan
+              const linkScan = await (async () => {
+                try {
+                let link = '';
+                try { const d: any = await ipc.zalo?.getGroupLinkDetail({ auth, groupId: g.contact_id }); link = d?.response?.link || ''; } catch {}
+                if (!link) return false;
+                let page = 1; const allMems: any[] = [];
+                while (true) {
+                  const res: any = await ipc.zalo?.getGroupLinkInfo({ auth, link, memberPage: page });
+                  if (!res?.success) break;
+                  const data = res.response; const cur = data.currentMems || [];
+                  allMems.push(...cur);
+                  if (!data.hasMoreMember) break;
+                  page++; await new Promise(r => setTimeout(r, 300));
+                  if (bulkStopRef.current) break;
+                }
+                if (allMems.length > 0) {
+                  const toSave = allMems.map((m: any) => ({ memberId: String(m.id||'').replace(/_0$/,''), displayName: m.dName||m.zaloName||'', avatar: m.avatar||'', role: 0 })).filter((m:any)=>/^\d+$/.test(m.memberId));
+                  if (toSave.length>0) { await DataAccessor.saveGroupMembers({ zaloId: activeAccountId, groupId: g.contact_id, members: toSave }); return true; }
+                }
+                return false;
+                } catch { return false; }
+              })();
+              if (linkScan) fallbackSaved = true;
             }
+            if (fallbackSaved) saved++;
+            else { failed++; errors.push({ groupId: g.contact_id, name: g.display_name, error: err?.message || 'Lỗi kết nối backend' }); }
           } catch (fallbackErr: any) {
             failed++;
             errors.push({ groupId: g.contact_id, name: g.display_name, error: err?.message || fallbackErr?.message || 'Lỗi không xác định' });
@@ -813,7 +863,8 @@ function ZaloGroupMembersTab() {
         }
       } catch {}
       if (!cached) {
-        setIsPremium(false);
+        // ADNzalo: mặc định Premium
+        setIsPremium(true);
         setPremiumExpiresAt(null);
       }
       setPremiumLoaded(true);
@@ -836,12 +887,12 @@ function ZaloGroupMembersTab() {
       }));
     } catch (err) {
       console.error('[GroupMembersTab] loadPremiumStatus error:', err);
-      // Lỗi → lưu ngày hôm qua để không gọi spam lại
-      const yesterday = new Date(Date.now() - 86400000).toISOString();
-      setIsPremium(false);
-      setPremiumExpiresAt(yesterday);
+      // ADNzalo: lỗi vẫn coi như Premium để không chặn quét
+      const farFuture = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+      setIsPremium(true);
+      setPremiumExpiresAt(farFuture);
       localStorage.setItem(storageKey, JSON.stringify({
-        expiresAt: yesterday,
+        expiresAt: farFuture,
         updatedAt: new Date().toISOString(),
       }));
     } finally {
@@ -1382,35 +1433,18 @@ function ZaloGroupMembersTab() {
                   )}
                 </div>
               </div>
-              {!isPremium && (
-                <>
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="font-bold text-green-400">✓ Miễn phí cho ADNzalo</span>
-                    <span className="text-sm text-gray-400">- Đã mở khóa, không cần nâng cấp</span>
-                  </div>
-                  <p className="text-xs text-gray-400 leading-relaxed">
-                    ADNzalo đã mở khóa quét thành viên nhóm ẩn - quét không giới hạn, không cần mua gói.
-                  </p>
-                  <button
-                    disabled
-                    className="w-full py-2.5 bg-green-600/20 text-green-400 text-sm font-semibold rounded-lg border border-green-600/30 flex items-center justify-center gap-2 cursor-default">
-                    ✓ Đã kích hoạt cho ADNzalo
-                  </button>
-                </>
-              )}
-              {isPremium && (
-                <div className="flex items-center justify-between">
-                  <p className="text-xs text-gray-400">Quét không giới hạn thành viên nhóm</p>
-                  <button
-                    onClick={() => setShowPaymentPopup(true)}
-                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                    </svg>
-                    Gia hạn thêm
-                  </button>
-                </div>
-              )}
+              {/* ADNzalo: luôn hiển thị miễn phí - không cần logic Premium */}
+              <div className="flex items-baseline gap-1.5">
+                <span className="font-bold text-green-400">✓ Miễn phí cho ADNzalo</span>
+                <span className="text-sm text-gray-400">- Đã mở khóa, không cần nâng cấp</span>
+              </div>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                ADNzalo đã mở khóa quét thành viên nhóm ẩn - quét không giới hạn, không cần mua gói.
+              </p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-400">Quét không giới hạn thành viên nhóm</p>
+                <span className="px-2 py-0.5 bg-green-500/15 text-green-400 text-[11px] font-medium rounded-full">Đang hoạt động</span>
+              </div>
             </div>
 
             {/* How it works */}

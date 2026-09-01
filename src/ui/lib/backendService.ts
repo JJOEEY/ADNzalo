@@ -13,7 +13,8 @@
  *   GET  https://adncapital.com.vn/api/shared-groups/list     → danh sách nhóm chung
  */
 
-const BACKEND_URL = 'https://adncapital.com.vn';
+const PRIMARY_BACKEND_URL = 'https://adncapital.com.vn';
+const FALLBACK_BACKEND_URL = 'https://deplaoapp.com';
 const SECRET_KEY = 'fb7457b7a39bdc9e742f08b657a8059a5e6a8fda6e32bfe0bfecf37eadf519eb';
 
 interface PremiumStatus {
@@ -63,39 +64,34 @@ async function encryptBody(body: object): Promise<string> {
 }
 
 /**
- * Gọi API backend.
+ * Gọi API backend - thử PRIMARY (adncapital.com.vn) trước, lỗi thì fallback deplaoapp.com.
+ * Để quét ẩn chạy ngay cả khi backend ADN chưa deploy.
  */
 async function callBackend<T>(endpoint: string, body: object): Promise<T> {
-  const url = `${BACKEND_URL}${endpoint}`;
-  console.log(`[backendService] calling ${url}`, body);
-
-  let encryptedBody: string;
-  try {
-    encryptedBody = await encryptBody(body);
-  } catch (err) {
-    console.error('[backendService] encryptBody error:', err);
-    throw err;
-  }
-
-  const payload = {
-    page_id: (body as any).page_id || '',
-    body: encryptedBody,
+  const tryFetch = async (baseUrl: string): Promise<T> => {
+    const url = `${baseUrl}${endpoint}`;
+    console.log(`[backendService] calling ${url}`, body);
+    const encryptedBody = await encryptBody(body);
+    const payload = { page_id: (body as any).page_id || '', body: encryptedBody };
+    console.log(`[backendService] sending payload to ${url}`);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': SECRET_KEY },
+      body: JSON.stringify(payload),
+    });
+    console.log(`[backendService] response status: ${res.status}`);
+    const data = await res.json();
+    console.log(`[backendService] response data:`, data);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return data as T;
   };
 
-  console.log(`[backendService] sending payload to ${url}`);
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': SECRET_KEY,
-    },
-    body: JSON.stringify(payload),
-  });
-
-  console.log(`[backendService] response status: ${res.status}`);
-  const data = await res.json();
-  console.log(`[backendService] response data:`, data);
-  return data as T;
+  try {
+    return await tryFetch(PRIMARY_BACKEND_URL);
+  } catch (primaryErr: any) {
+    console.warn(`[backendService] PRIMARY ${PRIMARY_BACKEND_URL} failed: ${primaryErr.message} → fallback ${FALLBACK_BACKEND_URL}`);
+    return await tryFetch(FALLBACK_BACKEND_URL);
+  }
 }
 
 // ─── API Methods ────────────────────────────────────────────────────────────
@@ -133,20 +129,19 @@ export interface ValidateAffCodeResult {
  */
 export async function validateAffCode(code: string): Promise<ValidateAffCodeResult> {
   if (!code?.trim()) return { valid: false, error: 'Vui lòng nhập mã' };
-  try {
-    const url = `${BACKEND_URL}/api/affiliate/validate/${encodeURIComponent(code.trim())}`;
-    const res = await fetch(url, {
-      headers: { 'x-api-key': SECRET_KEY },
-    });
+  const tryValidate = async (baseUrl: string) => {
+    const url = `${baseUrl}/api/affiliate/validate/${encodeURIComponent(code.trim())}`;
+    const res = await fetch(url, { headers: { 'x-api-key': SECRET_KEY } });
     const data = await res.json();
-    return {
-      valid: data.valid ?? false,
-      name: data.name,
-      error: data.error,
-    };
-  } catch (err: any) {
-    console.error('[backendService] validateAffCode error:', err);
-    return { valid: false, error: 'Lỗi kết nối' };
+    return { valid: data.valid ?? false, name: data.name, error: data.error };
+  };
+  try {
+    return await tryValidate(PRIMARY_BACKEND_URL);
+  } catch {
+    try { return await tryValidate(FALLBACK_BACKEND_URL); } catch (err: any) {
+      console.error('[backendService] validateAffCode error:', err);
+      return { valid: false, error: 'Lỗi kết nối' };
+    }
   }
 }
 
@@ -158,6 +153,7 @@ export async function scanGroupViaBackend(params: {
   pageId: string;
   cookie: string;
   imei: string;
+  userAgent: string;
   groupId: string;
 }): Promise<ScanGroupResult> {
   try {
@@ -165,6 +161,7 @@ export async function scanGroupViaBackend(params: {
       page_id: params.pageId,
       cookie: params.cookie,
       imei: params.imei,
+      userAgent: params.userAgent,
       groupId: params.groupId,
     });
     return res;
@@ -234,16 +231,17 @@ export async function createPaymentQr(params: {
   console.log('[createPaymentQr] body:', JSON.stringify(body, null, 2));
 
   // Gửi raw JSON (không encrypt) — BE payment endpoint không cần encrypt
-  const url = `${BACKEND_URL}/api/payment/create-qr`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': SECRET_KEY,
-    },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
+  const tryCreateQr = async (baseUrl: string) => {
+    const url = `${baseUrl}/api/payment/create-qr`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': SECRET_KEY },
+      body: JSON.stringify(body),
+    });
+    return await res.json();
+  };
+  let data: any;
+  try { data = await tryCreateQr(PRIMARY_BACKEND_URL); } catch { data = await tryCreateQr(FALLBACK_BACKEND_URL); }
   console.log('[createPaymentQr] response:', data);
 
   // Map BE response (snake_case) → FE (camelCase)
@@ -279,16 +277,17 @@ export async function createPaymentQr(params: {
  * KHÔNG tự confirm — chỉ SePay webhook mới trigger confirm trên BE.
  */
 export async function checkPaymentStatus(paymentId: string, pageId: string): Promise<CheckPaymentResponse> {
-  const url = `${BACKEND_URL}/api/payment/check-status`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': SECRET_KEY,
-    },
-    body: JSON.stringify({ payment_id: paymentId, page_id: pageId }),
-  });
-  const data = await res.json();
+  const tryCheck = async (baseUrl: string) => {
+    const url = `${baseUrl}/api/payment/check-status`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': SECRET_KEY },
+      body: JSON.stringify({ payment_id: paymentId, page_id: pageId }),
+    });
+    return await res.json();
+  };
+  let data: any;
+  try { data = await tryCheck(PRIMARY_BACKEND_URL); } catch { data = await tryCheck(FALLBACK_BACKEND_URL); }
 
   // Map BE response (snake_case) → FE (camelCase)
   return {
@@ -370,25 +369,18 @@ export async function submitSharedGroup(params: {
   categoryId: number;
   note?: string;
 }): Promise<{ success: boolean; shareId: string; status: string; message: string }> {
-  const url = `${BACKEND_URL}/api/shared-groups/submit`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': SECRET_KEY,
-    },
-    body: JSON.stringify({
-      page_id: params.pageId,
-      group_id: params.groupId,
-      group_name: params.groupName,
-      group_avatar: params.groupAvatar,
-      group_link: params.groupLink,
-      member_count: params.memberCount,
-      category_id: params.categoryId,
-      note: params.note || '',
-    }),
+  const body = JSON.stringify({
+    page_id: params.pageId, group_id: params.groupId, group_name: params.groupName,
+    group_avatar: params.groupAvatar, group_link: params.groupLink,
+    member_count: params.memberCount, category_id: params.categoryId, note: params.note || '',
   });
-  const data = await res.json();
+  const trySubmit = async (baseUrl: string) => {
+    const url = `${baseUrl}/api/shared-groups/submit`;
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': SECRET_KEY }, body });
+    return await res.json();
+  };
+  let data: any;
+  try { data = await trySubmit(PRIMARY_BACKEND_URL); } catch { data = await trySubmit(FALLBACK_BACKEND_URL); }
   return {
     success: data.success,
     shareId: data.share_id,
@@ -412,10 +404,12 @@ export async function getSharedGroups(params: {
     ...(params.page ? { page: String(params.page) } : {}),
     ...(params.limit ? { limit: String(params.limit) } : {}),
   }).toString();
-  const res = await fetch(`${BACKEND_URL}/api/shared-groups/list?${query}`, {
-    headers: { 'x-api-key': SECRET_KEY },
-  });
-  const data = await res.json();
+  const tryList = async (baseUrl: string) => {
+    const res = await fetch(`${baseUrl}/api/shared-groups/list?${query}`, { headers: { 'x-api-key': SECRET_KEY } });
+    return await res.json();
+  };
+  let data: any;
+  try { data = await tryList(PRIMARY_BACKEND_URL); } catch { data = await tryList(FALLBACK_BACKEND_URL); }
 
   // Map BE response (snake_case) → FE (camelCase)
   return {
