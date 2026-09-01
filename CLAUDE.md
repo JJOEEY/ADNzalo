@@ -61,14 +61,14 @@ npm install
 Tạo `.env`:
 ```env
 SECRET_KEY=<SECRET_KEY>
-PORT=3000
+PORT=3100
 ```
 > Không commit khóa thật. `SECRET_KEY` phải trùng khóa cấu hình của app.
 > `server.js` nạp `.env` qua `dotenv`; production nên đặt file env ngoài thư mục repo hoặc dùng `EnvironmentFile` của systemd.
 
 ### 3. Chạy
 ```bash
-SECRET_KEY=... PORT=3000 node server.js
+SECRET_KEY=... PORT=3100 node server.js
 ```
 
 ### 4. Nginx reverse proxy
@@ -79,21 +79,21 @@ server {
 
     # Chỉ proxy các route của scan backend; không chiếm toàn bộ /api/ của ADN.
     location = /api/health {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:3100;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
     location = /api/scan/group {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:3100;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
     location = /api/scan/premium-status {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:3100;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -137,7 +137,7 @@ Không xóa fallback trước khi `https://adncapital.com.vn/api/health` trả H
 2. **x-api-key** — mọi request backend phải có header này, giá trị = `SECRET_KEY`.
 3. **Rate limit** — 60 req/phút/IP.
 4. **Cookie/IMEI** — chỉ truyền qua AES-128-CBC mã hóa, không lưu trữ vĩnh viễn.
-5. **Nginx** — chỉ proxy các route scan cụ thể, không mở port 3000 ra internet.
+5. **Nginx** — chỉ proxy các route scan cụ thể, không mở port 3100 ra internet.
 6. **Quyền Zalo** — backend không nâng quyền tài khoản; danh sách đầy đủ chỉ trả được khi cookie đăng nhập có quyền và API Zalo cho phép.
 7. **Không tự bật link nhóm** — nếu invite link bị tắt, báo giới hạn quyền thay vì thay đổi cài đặt nhóm.
 

@@ -9,27 +9,27 @@ cd server/adn-scan-backend
 npm install
 # Tạo file .env (file này không được commit)
 SECRET_KEY=<SECRET_KEY>
-PORT=3000
+PORT=3100
 node server.js
-# Đặt reverse proxy https://adncapital.com.vn/api -> http://localhost:3000
+# Đặt reverse proxy https://adncapital.com.vn/api -> http://localhost:3100
 ```
 
 Nginx:
 ```
 location = /api/health {
-  proxy_pass http://127.0.0.1:3000;
+  proxy_pass http://127.0.0.1:3100;
   proxy_set_header Host $host;
   proxy_set_header X-Real-IP $remote_addr;
   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 }
 location = /api/scan/group {
-  proxy_pass http://127.0.0.1:3000;
+  proxy_pass http://127.0.0.1:3100;
   proxy_set_header Host $host;
   proxy_set_header X-Real-IP $remote_addr;
   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 }
 location = /api/scan/premium-status {
-  proxy_pass http://127.0.0.1:3000;
+  proxy_pass http://127.0.0.1:3100;
   proxy_set_header Host $host;
   proxy_set_header X-Real-IP $remote_addr;
   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

@@ -10,7 +10,7 @@ app.use(cors({ origin: true }));
 app.use(express.json({ limit: '1mb' }));
 
 const SECRET_KEY = process.env.SECRET_KEY || '';
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 3100);
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36';
 
 if (!/^[0-9a-fA-F]{32,}$/.test(SECRET_KEY)) {
