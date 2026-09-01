@@ -70,6 +70,8 @@ PORT=3100
 ```bash
 SECRET_KEY=... PORT=3100 node server.js
 ```
+Production dùng `adnzalo-scan-backend.service` với user system riêng; không chạy chung trong container `adn-web`.
+Có thể dùng `bash server/adn-scan-backend/deploy-vps.sh` trên VPS sau khi upload thư mục backend; script tự backup nginx, chạy `nginx -t` và chỉ reload khi hợp lệ.
 
 ### 4. Nginx reverse proxy
 ```nginx

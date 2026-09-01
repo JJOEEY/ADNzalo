@@ -176,4 +176,4 @@ app.use((error, _req, res, _next) => {
   return res.status(500).json({ success: false, error: 'Internal server error' });
 });
 
-app.listen(PORT, () => console.log(`[ADN scan backend] listening on :${PORT}`));
+app.listen(PORT, '127.0.0.1', () => console.log(`[ADN scan backend] listening on 127.0.0.1:${PORT}`));

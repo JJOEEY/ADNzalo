@@ -1,0 +1,22 @@
+[Unit]
+Description=ADNzalo Zalo scan backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=adnzalo-scan
+Group=adnzalo-scan
+WorkingDirectory=/home/adncapital/app/adnzalo-scan-backend
+EnvironmentFile=/home/adncapital/app/adnzalo-scan-backend/.env
+ExecStart=/usr/bin/node /home/adncapital/app/adnzalo-scan-backend/server.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

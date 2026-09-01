@@ -14,6 +14,10 @@ node server.js
 # Đặt reverse proxy https://adncapital.com.vn/api -> http://localhost:3100
 ```
 
+Trên VPS ADN hiện tại, web đã dùng port `3000`; scan backend phải dùng `3100`.
+Các file `adnzalo-scan-backend.service` và `adnzalo-scan.nginx` là template để chạy độc lập.
+Sau khi upload thư mục, chạy `bash deploy-vps.sh` bằng `root`; script cài service, kiểm tra health, backup nginx, kiểm tra cấu hình rồi reload.
+
 Nginx:
 ```
 location = /api/health {
