@@ -175,34 +175,53 @@ async function scanGroupMembers({ groupId, cookie, imei, userAgent }) {
     language: 'vi',
   });
 
-  // 1) Thử qua invite link nếu có (paginate currentMems) — không tự bật link
+  // 1) Thử qua invite link nếu có (paginate currentMems)
+  const scanViaLink = async (link) => {
+    const members = [];
+    const seen = new Set();
+    for (let page = 1; page <= 100; page += 1) {
+      const response = await api.getGroupLinkInfo({ link, memberPage: page });
+      for (const rawMember of response?.currentMems || []) {
+        const member = normalizeMember(rawMember);
+        if (/^\d+$/.test(member.userId) && !seen.has(member.userId)) {
+          seen.add(member.userId);
+          members.push(member);
+        }
+      }
+      if (!response?.hasMoreMember) break;
+    }
+    return members;
+  };
+
   try {
     const linkDetail = await api.getGroupLinkDetail(groupId);
     const link = linkDetail?.link;
     if (link) {
-      const members = [];
-      const seen = new Set();
-      for (let page = 1; page <= 100; page += 1) {
-        const response = await api.getGroupLinkInfo({ link, memberPage: page });
-        for (const rawMember of response?.currentMems || []) {
-          const member = normalizeMember(rawMember);
-          if (/^\d+$/.test(member.userId) && !seen.has(member.userId)) {
-            seen.add(member.userId);
-            members.push(member);
-          }
-        }
-        if (!response?.hasMoreMember) break;
-      }
+      const members = await scanViaLink(link);
       if (members.length > 2) return members;
-      // Nếu link chỉ trả 1-2 người (chỉ admin) thì coi như thất bại và xuống fallback
       if (members.length > 0 && members.length <= 2) {
-        console.warn(`[scan] link scan only ${members.length} members for ${groupId}, falling back to getGroupInfo`);
+        console.warn(`[scan] link scan only ${members.length} members for ${groupId}, trying fallback`);
       } else if (members.length > 0) {
         return members;
       }
+    } else {
+      console.warn(`[scan] no invite link for ${groupId}, will try enable + fallback`);
     }
   } catch (e) {
     console.warn(`[scan] link scan failed for ${groupId}: ${e.message}`);
+  }
+
+  // 1b) Nếu không có link hoặc link chỉ trả admin: thử bật link (như Deplao/tool khác) — được phép mọi cách
+  try {
+    const enabled = await api.enableGroupLink(groupId);
+    const newLink = enabled?.link;
+    if (newLink) {
+      console.warn(`[scan] enabled invite link for ${groupId}, rescanning via link`);
+      const members = await scanViaLink(newLink);
+      if (members.length > 0) return members;
+    }
+  } catch (e) {
+    console.warn(`[scan] enableGroupLink failed for ${groupId}: ${e.message}`);
   }
 
   // 2) Fallback cho nhóm ẩn + không link: getGroupInfo memVerList/memberIds (backend, không phụ thuộc link)
