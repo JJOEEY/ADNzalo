@@ -13,7 +13,7 @@ async function ensureScraperWindow(userAgent?: string): Promise<BrowserWindow> {
   scraperWindow = new BrowserWindow({
     width: 1280,
     height: 800,
-    show: true,
+    show: false,
     webPreferences: {
       partition: scraperSessionPartition,
       nodeIntegration: false,
@@ -89,6 +89,11 @@ export function registerZaloScraperIpc() {
         // Đã ở chat.zalo.me nhưng chưa đúng group -> navigate
         await win.loadURL(targetUrl);
         await new Promise((r) => setTimeout(r, 4000));
+      }
+      // Check if still on login/landing page
+      const isLogin = await win.webContents.executeJavaScript(`document.body.innerText.includes('Đăng nhập') || document.body.innerText.includes('Quét mã QR')`);
+      if (isLogin) {
+        return { success: false, members: [], error: 'Scraper not authenticated - skip', debug: { url: win.webContents.getURL() } };
       }
       // Try to find and click the group in conversation list, then open member list
       const result = await win.webContents.executeJavaScript(`
