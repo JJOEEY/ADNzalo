@@ -106,6 +106,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     reviewPendingMemberRequest: (params: any) => ipcRenderer.invoke('zalo:reviewPendingMemberRequest', params),
     getMessageHistory: (params: any) => ipcRenderer.invoke('zalo:getMessageHistory', params),
     getGroupChatHistory: (params: any) => ipcRenderer.invoke('zalo:getGroupChatHistory', params),
+    scrapeGroupMembers: (params: any) => ipcRenderer.invoke('zalo:scrapeGroupMembers', params),
+    closeScraper: () => ipcRenderer.invoke('zalo:closeScraper'),
     getPinConversations: (auth: any) => ipcRenderer.invoke('zalo:getPinConversations', { auth }),
     setPinConversation: (params: any) => ipcRenderer.invoke('zalo:setPinConversation', params),
     setMute: (params: any) => ipcRenderer.invoke('zalo:setMute', params),

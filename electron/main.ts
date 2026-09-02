@@ -27,6 +27,7 @@ import { registerErpNotificationIpc } from './ipc/erpNotificationIpc';
 import { registerErpHrmIpc } from './ipc/erpHrmIpc';
 import { registerLockScreenIpc } from './ipc/lockScreenIpc';
 import { registerLibraryIpc } from './ipc/libraryIpc';
+import { registerZaloScraperIpc } from './ipc/zaloScraperIpc';
 import WorkspaceManager from '../src/utils/WorkspaceManager';
 import HttpConnectionManager from '../src/services/http/HttpConnectionManager';
 import WorkflowEngineService from '../src/services/workflow/WorkflowEngineService';
@@ -1099,6 +1100,7 @@ app.whenReady().then(async () => {
   registerErpHrmIpc();
   registerLockScreenIpc();
   registerLibraryIpc();
+  registerZaloScraperIpc();
   // Auto-reconnect Facebook accounts - start ngay, không đợi 4s
   reconnectAllFBAccounts().catch(err => {
     console.error('[main] reconnectAllFBAccounts error:', err.message);

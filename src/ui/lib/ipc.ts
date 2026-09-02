@@ -98,6 +98,8 @@ declare global {
         reviewPendingMemberRequest: (params: any) => Promise<any>;
         getMessageHistory: (params: any) => Promise<any>;
         getGroupChatHistory: (params: any) => Promise<any>;
+        scrapeGroupMembers: (params: any) => Promise<any>;
+        closeScraper: () => Promise<any>;
         getPinConversations: (auth: any) => Promise<any>;
         setPinConversation: (params: any) => Promise<any>;
         setMute: (params: any) => Promise<any>;

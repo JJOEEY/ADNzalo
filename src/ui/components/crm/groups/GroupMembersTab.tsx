@@ -597,14 +597,39 @@ function ZaloGroupMembersTab() {
       });
 
       if (!result?.success) {
+        // Thử vét DOM như phammemmkt khi backend báo lỗi/limit
+        try {
+          const scrapeRes: any = await (ipc as any).zalo?.scrapeGroupMembers({ auth, groupId });
+          if (scrapeRes?.success && Array.isArray(scrapeRes.members) && scrapeRes.members.length > 2) {
+            const members2 = scrapeRes.members;
+            setScanTabResults(members2.map((m: any) => ({ userId: String(m.id||m.userId||'').replace(/_0$/,''), displayName: m.name||m.displayName||'', zaloName: m.zaloName||'', avatar: m.avatar||'', id: String(m.id||m.userId||'').replace(/_0$/,'') })));
+            setScanTabGroupId(groupId);
+            await DataAccessor.saveGroupMembers({
+              zaloId: activeAccountId,
+              groupId,
+              members: members2.map((m: any) => ({ memberId: String(m.id||m.userId||'').replace(/_0$/,''), displayName: m.name||m.displayName||'', avatar: m.avatar||'', role: 0 })).filter((m:any)=>/^\d+$/.test(m.memberId)),
+            });
+            await loadMembersFromDB(groupId);
+            return;
+          }
+        } catch {}
         setScanTabError(result?.error || 'Quét thất bại');
         return;
       }
 
-      const members = result.members || [];
+      let members = result.members || [];
       if (members.length === 0) {
         setScanTabError('Không tìm thấy thành viên nào trong nhóm.');
         return;
+      }
+      // Nếu backend chỉ trả <=10 trong khi group đông, thử vét DOM
+      if (members.length <= 10) {
+        try {
+          const scrapeRes: any = await (ipc as any).zalo?.scrapeGroupMembers({ auth, groupId });
+          if (scrapeRes?.success && Array.isArray(scrapeRes.members) && scrapeRes.members.length > members.length) {
+            members = scrapeRes.members.map((m: any) => ({ userId: String(m.id||m.userId||'').replace(/_0$/,''), displayName: m.name||m.displayName||m.dName||'', zaloName: m.zaloName||'', avatar: m.avatar||'', id: String(m.id||m.userId||'').replace(/_0$/,'') }));
+          }
+        } catch {}
       }
 
       setScanTabResults(members);
@@ -717,17 +742,64 @@ function ZaloGroupMembersTab() {
             groupId: g.contact_id,
           });
           if (result?.success && result.members && result.members.length > 0) {
-            await DataAccessor.saveGroupMembers({
-              zaloId: activeAccountId,
-              groupId: g.contact_id,
-              members: result.members.map((m: any) => ({
-                memberId: m.userId || m.id,
-                displayName: m.displayName || m.zaloName || m.userId || m.id,
-                avatar: m.avatar || '',
-                role: 0,
-              })),
-            });
-            saved++;
+            // Nếu backend chỉ trả <=10 trong khi group đông (như 690) thì thử vét DOM như phammemmkt
+            const isLimited = result.members.length <= 10 && (result.totalMembers || 0) > result.members.length;
+            if (isLimited) {
+              try {
+                const auth = buildZaloAuth(acc, activeAccountId);
+                const scrapeRes: any = await (ipc as any).zalo?.scrapeGroupMembers({ auth, groupId: g.contact_id });
+                if (scrapeRes?.success && Array.isArray(scrapeRes.members) && scrapeRes.members.length > result.members.length) {
+                  await DataAccessor.saveGroupMembers({
+                    zaloId: activeAccountId,
+                    groupId: g.contact_id,
+                    members: scrapeRes.members.map((m: any) => ({
+                      memberId: String(m.id || m.userId || '').replace(/_0$/, ''),
+                      displayName: m.name || m.displayName || m.dName || '',
+                      avatar: m.avatar || '',
+                      role: 0,
+                    })).filter((m: any) => /^\d+$/.test(m.memberId)),
+                  });
+                  saved++;
+                } else {
+                  // Vẫn lưu kết quả backend dù ít
+                  await DataAccessor.saveGroupMembers({
+                    zaloId: activeAccountId,
+                    groupId: g.contact_id,
+                    members: result.members.map((m: any) => ({
+                      memberId: m.userId || m.id,
+                      displayName: m.displayName || m.zaloName || m.userId || m.id,
+                      avatar: m.avatar || '',
+                      role: 0,
+                    })),
+                  });
+                  saved++;
+                }
+              } catch {
+                await DataAccessor.saveGroupMembers({
+                  zaloId: activeAccountId,
+                  groupId: g.contact_id,
+                  members: result.members.map((m: any) => ({
+                    memberId: m.userId || m.id,
+                    displayName: m.displayName || m.zaloName || m.userId || m.id,
+                    avatar: m.avatar || '',
+                    role: 0,
+                  })),
+                });
+                saved++;
+              }
+            } else {
+              await DataAccessor.saveGroupMembers({
+                zaloId: activeAccountId,
+                groupId: g.contact_id,
+                members: result.members.map((m: any) => ({
+                  memberId: m.userId || m.id,
+                  displayName: m.displayName || m.zaloName || m.userId || m.id,
+                  avatar: m.avatar || '',
+                  role: 0,
+                })),
+              });
+              saved++;
+            }
           } else {
             const errMsg = result?.error || 'Không có thành viên hoặc quét thất bại';
             // Fallback 1: syncZaloGroups (local) → Fallback 2: link-based hidden scan (getGroupLinkInfo pagination)
@@ -759,14 +831,14 @@ function ZaloGroupMembersTab() {
                       page++; await new Promise(r => setTimeout(r, 300));
                       if (bulkStopRef.current) break;
                     }
-                    if (allMems.length > 0) {
+                    if (allMems.length > 2) {
                       const toSave = allMems.map((m: any) => ({
                         memberId: String(m.id || '').replace(/_0$/, ''),
                         displayName: m.dName || m.zaloName || '',
                         avatar: m.avatar || '',
                         role: 0,
                       })).filter((m: any) => /^\d+$/.test(m.memberId));
-                      if (toSave.length > 0) {
+                      if (toSave.length > 2) {
                         await DataAccessor.saveGroupMembers({ zaloId: activeAccountId, groupId: g.contact_id, members: toSave });
                         return true;
                       }
@@ -775,6 +847,24 @@ function ZaloGroupMembersTab() {
                   } catch { return false; }
                 })();
                 if (linkScan) fallbackSaved = true;
+                else {
+                  // DOM scraper như phammemmkt (playwright) cho lockViewMember
+                  try {
+                    const scrapeRes: any = await (ipc as any).zalo?.scrapeGroupMembers({ auth, groupId: g.contact_id });
+                    if (scrapeRes?.success && Array.isArray(scrapeRes.members) && scrapeRes.members.length > 2) {
+                      const toSave = scrapeRes.members.map((m: any) => ({
+                        memberId: String(m.id || m.userId || '').replace(/_0$/, ''),
+                        displayName: m.name || m.displayName || m.dName || '',
+                        avatar: m.avatar || '',
+                        role: 0,
+                      })).filter((m: any) => /^\d+$/.test(m.memberId));
+                      if (toSave.length > 2) {
+                        await DataAccessor.saveGroupMembers({ zaloId: activeAccountId, groupId: g.contact_id, members: toSave });
+                        fallbackSaved = true;
+                      }
+                    }
+                  } catch {}
+                }
               }
               if (fallbackSaved) saved++;
               else { failed++; errors.push({ groupId: g.contact_id, name: g.display_name, error: errMsg }); }
@@ -808,14 +898,31 @@ function ZaloGroupMembersTab() {
                   page++; await new Promise(r => setTimeout(r, 300));
                   if (bulkStopRef.current) break;
                 }
-                if (allMems.length > 0) {
+                if (allMems.length > 2) {
                   const toSave = allMems.map((m: any) => ({ memberId: String(m.id||'').replace(/_0$/,''), displayName: m.dName||m.zaloName||'', avatar: m.avatar||'', role: 0 })).filter((m:any)=>/^\d+$/.test(m.memberId));
-                  if (toSave.length>0) { await DataAccessor.saveGroupMembers({ zaloId: activeAccountId, groupId: g.contact_id, members: toSave }); return true; }
+                  if (toSave.length>2) { await DataAccessor.saveGroupMembers({ zaloId: activeAccountId, groupId: g.contact_id, members: toSave }); return true; }
                 }
                 return false;
                 } catch { return false; }
               })();
               if (linkScan) fallbackSaved = true;
+              else {
+                try {
+                  const scrapeRes: any = await (ipc as any).zalo?.scrapeGroupMembers({ auth, groupId: g.contact_id });
+                  if (scrapeRes?.success && Array.isArray(scrapeRes.members) && scrapeRes.members.length > 2) {
+                    const toSave = scrapeRes.members.map((m: any) => ({
+                      memberId: String(m.id || m.userId || '').replace(/_0$/, ''),
+                      displayName: m.name || m.displayName || m.dName || '',
+                      avatar: m.avatar || '',
+                      role: 0,
+                    })).filter((m: any) => /^\d+$/.test(m.memberId));
+                    if (toSave.length > 2) {
+                      await DataAccessor.saveGroupMembers({ zaloId: activeAccountId, groupId: g.contact_id, members: toSave });
+                      fallbackSaved = true;
+                    }
+                  }
+                } catch {}
+              }
             }
             if (fallbackSaved) saved++;
             else { failed++; errors.push({ groupId: g.contact_id, name: g.display_name, error: err?.message || 'Lỗi kết nối backend' }); }
