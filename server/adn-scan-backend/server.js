@@ -96,6 +96,76 @@ function normalizeMember(member) {
   };
 }
 
+function extractIdsFromGroupInfo(gData) {
+  const rawIds =
+    (Array.isArray(gData.memberIds) && gData.memberIds.length > 0 ? gData.memberIds : null) ??
+    (Array.isArray(gData.currentMems) && gData.currentMems.length > 0 ? gData.currentMems.map((m) => String(m.id || '')) : null) ??
+    (Array.isArray(gData.memVerList) ? gData.memVerList : null) ??
+    (gData.memVerList && typeof gData.memVerList === 'object' ? Object.keys(gData.memVerList) : null) ??
+    [];
+  return [...new Set(rawIds.map((id) => String(id).replace(/_0$/, '').trim()).filter((id) => /^\d+$/.test(id)))];
+}
+
+async function enrichMembers(api, memberIds) {
+  if (memberIds.length === 0) return [];
+  // Thử getGroupMembersInfo trước (nhanh, batch theo Zalo)
+  try {
+    const res = await api.getGroupMembersInfo(memberIds);
+    const map = res?.data ?? res?.memberInfoMap ?? res?.response ?? {};
+    // zca-js getGroupMembersInfo trả về map {uid: profile}
+    if (map && typeof map === 'object' && !Array.isArray(map)) {
+      const out = [];
+      for (const uid of memberIds) {
+        const p = map[uid] ?? map[`${uid}_0`] ?? null;
+        if (p) {
+          out.push({
+            userId: uid,
+            displayName: p.displayName || p.zaloName || p.dName || '',
+            zaloName: p.zaloName || '',
+            avatar: p.avatar || p.avatar_25 || '',
+            accountStatus: Number(p.accountStatus || 0),
+            type: Number(p.type || 0),
+            id: uid,
+          });
+        } else {
+          out.push({ userId: uid, displayName: '', zaloName: '', avatar: '', accountStatus: 0, type: 0, id: uid });
+        }
+      }
+      if (out.some((m) => m.displayName)) return out;
+    }
+  } catch {}
+  // Fallback: getUserInfo batch 200 (đắt hơn nhưng chắc chắn có tên)
+  const BATCH = 200;
+  const enriched = [];
+  for (let i = 0; i < memberIds.length; i += BATCH) {
+    const batch = memberIds.slice(i, i + BATCH);
+    try {
+      const uRes = await api.getUserInfo(batch);
+      const changed = uRes?.changed_profiles ?? uRes?.response?.changed_profiles ?? {};
+      for (const uid of batch) {
+        const p = changed[uid] ?? changed[`${uid}_0`] ?? null;
+        if (p) {
+          enriched.push({
+            userId: uid,
+            displayName: p.displayName || p.zaloName || p.dName || '',
+            zaloName: p.zaloName || '',
+            avatar: p.avatar || p.avatar_25 || '',
+            accountStatus: Number(p.accountStatus || 0),
+            type: Number(p.type || 0),
+            id: uid,
+          });
+        } else {
+          enriched.push({ userId: uid, displayName: '', zaloName: '', avatar: '', accountStatus: 0, type: 0, id: uid });
+        }
+      }
+    } catch {
+      for (const uid of batch) enriched.push({ userId: uid, displayName: '', zaloName: '', avatar: '', accountStatus: 0, type: 0, id: uid });
+    }
+    if (i + BATCH < memberIds.length) await new Promise((r) => setTimeout(r, 120));
+  }
+  return enriched;
+}
+
 async function scanGroupMembers({ groupId, cookie, imei, userAgent }) {
   const zalo = new Zalo({ checkUpdate: false, logging: false });
   const api = await zalo.login({
@@ -105,29 +175,61 @@ async function scanGroupMembers({ groupId, cookie, imei, userAgent }) {
     language: 'vi',
   });
 
-  // getGroupLinkInfo is the only zca-js endpoint in this project that exposes
-  // a paginated currentMems list. It requires an existing invite link; never
-  // enable a link here because that mutates the user's group settings.
-  const linkDetail = await api.getGroupLinkDetail(groupId);
-  const link = linkDetail?.link;
-  if (!link) {
-    throw new Error('Group invite link is disabled; cannot fetch the full member list');
-  }
-
-  const members = [];
-  const seen = new Set();
-  for (let page = 1; page <= 100; page += 1) {
-    const response = await api.getGroupLinkInfo({ link, memberPage: page });
-    for (const rawMember of response?.currentMems || []) {
-      const member = normalizeMember(rawMember);
-      if (/^\d+$/.test(member.userId) && !seen.has(member.userId)) {
-        seen.add(member.userId);
-        members.push(member);
+  // 1) Thử qua invite link nếu có (paginate currentMems) — không tự bật link
+  try {
+    const linkDetail = await api.getGroupLinkDetail(groupId);
+    const link = linkDetail?.link;
+    if (link) {
+      const members = [];
+      const seen = new Set();
+      for (let page = 1; page <= 100; page += 1) {
+        const response = await api.getGroupLinkInfo({ link, memberPage: page });
+        for (const rawMember of response?.currentMems || []) {
+          const member = normalizeMember(rawMember);
+          if (/^\d+$/.test(member.userId) && !seen.has(member.userId)) {
+            seen.add(member.userId);
+            members.push(member);
+          }
+        }
+        if (!response?.hasMoreMember) break;
+      }
+      if (members.length > 2) return members;
+      // Nếu link chỉ trả 1-2 người (chỉ admin) thì coi như thất bại và xuống fallback
+      if (members.length > 0 && members.length <= 2) {
+        console.warn(`[scan] link scan only ${members.length} members for ${groupId}, falling back to getGroupInfo`);
+      } else if (members.length > 0) {
+        return members;
       }
     }
-    if (!response?.hasMoreMember) break;
+  } catch (e) {
+    console.warn(`[scan] link scan failed for ${groupId}: ${e.message}`);
   }
-  return members;
+
+  // 2) Fallback cho nhóm ẩn + không link: getGroupInfo memVerList/memberIds (backend, không phụ thuộc link)
+  const infoRes = await api.getGroupInfo(groupId);
+  const gridMap = infoRes?.gridInfoMap ?? infoRes?.response?.gridInfoMap ?? {};
+  const gData = gridMap[groupId] ?? Object.values(gridMap)[0];
+  if (!gData) throw new Error('Cannot fetch group info');
+
+  const creatorId = String(gData.creatorId || '').replace(/_0$/, '');
+  const adminIds = (gData.adminIds || []).map((a) => String(a).replace(/_0$/, ''));
+  const adminSet = new Set([creatorId, ...adminIds].filter(Boolean));
+  const memberIds = extractIdsFromGroupInfo(gData);
+  if (memberIds.length === 0) throw new Error('Empty member list from getGroupInfo');
+
+  // Nếu Zalo chỉ trả trưởng/phó (<=2) và totalMember báo lớn hơn thì đây là giới hạn quyền, báo rõ
+  const totalReported = Number(gData.totalMember || 0);
+  if (memberIds.length <= 2 && totalReported > memberIds.length) {
+    console.warn(`[scan] getGroupInfo limited to ${memberIds.length}/${totalReported} for ${groupId} (lockViewMember?)`);
+  }
+
+  const enriched = await enrichMembers(api, memberIds);
+  // Gắn role
+  return enriched.map((m) => ({
+    ...m,
+    type: m.type,
+    // role suy ra để FE hiển thị, nhưng backend trả theo type
+  }));
 }
 
 // ── POST /api/scan/group ───────────────────────────────────────────────────
