@@ -167,28 +167,23 @@ async function enrichMembers(api, memberIds) {
   return enriched;
 }
 
-async function tryZaloLoginWithVersions(cookie, imei, userAgent) {
-  const combos = [
-    { apiType: 30, ver: 671 }, { apiType: 30, ver: 660 }, { apiType: 30, ver: 640 },
-    { apiType: 30, ver: 620 }, { apiType: 30, ver: 600 }, { apiType: 30, ver: 580 },
-    { apiType: 20, ver: 671 }, { apiType: 20, ver: 660 },
-  ];
-  for (const { apiType, ver } of combos) {
-    try {
-      const zalo = new Zalo({ checkUpdate: false, logging: false, apiType, apiVersion: ver });
-      const api = await zalo.login({ cookie: parseCookieJar(cookie), imei, userAgent: userAgent || DEFAULT_USER_AGENT, language: 'vi' });
-      console.warn(`[scan] login ok with apiType=${apiType} apiVersion=${ver}`);
-      return { api, ver, apiType };
-    } catch (e) {
-      console.warn(`[scan] login failed apiType=${apiType} apiVersion=${ver}: ${e.message}`);
-    }
+const apiCache = new Map();
+async function getCachedApi(pageId, cookie, imei, userAgent) {
+  const key = `${pageId}:${imei}`;
+  const cached = apiCache.get(key);
+  if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
+    console.warn(`[scan] reuse cached api for ${pageId}`);
+    return cached.api;
   }
-  throw new Error('All apiVersion logins failed');
+  const zalo = new Zalo({ checkUpdate: false, logging: false, apiType: 30, apiVersion: 671 });
+  const api = await zalo.login({ cookie: parseCookieJar(cookie), imei, userAgent: userAgent || DEFAULT_USER_AGENT, language: 'vi' });
+  apiCache.set(key, { api, ts: Date.now() });
+  console.warn(`[scan] login ok for ${pageId}`);
+  return api;
 }
 
-async function scanGroupMembers({ groupId, cookie, imei, userAgent }) {
-  const { api, ver } = await tryZaloLoginWithVersions(cookie, imei, userAgent);
-  console.warn(`[scan] using apiVersion=${ver} for ${groupId}`);
+async function scanGroupMembers({ groupId, cookie, imei, userAgent, pageId }) {
+  const api = await getCachedApi(pageId || groupId, cookie, imei, userAgent);
 
   // 1) Thử qua invite link nếu có (paginate currentMems)
   const scanViaLink = async (link) => {
@@ -387,6 +382,7 @@ app.post('/api/scan/group', rateLimit, requireApiKey, async (req, res) => {
       cookie,
       imei,
       userAgent: payload.userAgent,
+      pageId: page_id,
     });
     // Y như Deplao: nếu live chỉ ra <=10 nhưng Zalo báo đông, thử lấy cache từ deplaoapp.com (pool admin)
     if (members.length <= 10) {
