@@ -5,8 +5,11 @@ import * as fs from 'fs';
 let scraperWindow: BrowserWindow | null = null;
 let scraperSessionPartition = 'persist:zalo-scraper';
 
-async function ensureScraperWindow(): Promise<BrowserWindow> {
-  if (scraperWindow && !scraperWindow.isDestroyed()) return scraperWindow;
+async function ensureScraperWindow(userAgent?: string): Promise<BrowserWindow> {
+  if (scraperWindow && !scraperWindow.isDestroyed()) {
+    if (userAgent) scraperWindow.webContents.setUserAgent(userAgent);
+    return scraperWindow;
+  }
   scraperWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -17,11 +20,12 @@ async function ensureScraperWindow(): Promise<BrowserWindow> {
       contextIsolation: true,
     },
   });
+  if (userAgent) scraperWindow.webContents.setUserAgent(userAgent);
   scraperWindow.on('closed', () => { scraperWindow = null; });
   return scraperWindow;
 }
 
-function parseCookiesForElectron(cookiesJson: string): Array<{ url: string; name: string; value: string; domain?: string; path?: string }> {
+function parseCookiesForElectron(cookiesJson: string): Array<{ url: string; name: string; value: string; domain?: string; path?: string; expirationDate?: number; secure?: boolean; httpOnly?: boolean }> {
   try {
     const jar = JSON.parse(cookiesJson);
     const cookies = Array.isArray(jar) ? jar : jar.cookies;
@@ -30,8 +34,11 @@ function parseCookiesForElectron(cookiesJson: string): Array<{ url: string; name
       url: `https://${(c.domain || 'chat.zalo.me').replace(/^\./, '')}${c.path || '/'}`,
       name: c.key || c.name,
       value: c.value,
-      domain: c.domain,
+      domain: c.domain?.replace(/^\./, ''),
       path: c.path || '/',
+      expirationDate: c.expires ? new Date(c.expires).getTime() / 1000 : c.expirationDate,
+      secure: c.secure,
+      httpOnly: c.httpOnly,
     })).filter((c) => c.name && c.value);
   } catch {
     return [];
@@ -47,8 +54,11 @@ async function setZaloCookies(cookiesJson: string) {
         url: c.url,
         name: c.name,
         value: c.value,
-        domain: c.domain?.replace(/^\./, ''),
+        domain: c.domain,
         path: c.path,
+        expirationDate: c.expirationDate,
+        secure: c.secure,
+        httpOnly: c.httpOnly,
       });
     } catch {}
   }
@@ -58,13 +68,21 @@ export function registerZaloScraperIpc() {
   ipcMain.handle('zalo:scrapeGroupMembers', async (_event, params: { auth: { cookies: string; imei: string; userAgent: string }; groupId: string }) => {
     const { auth, groupId } = params;
     if (!auth?.cookies || !groupId) return { success: false, members: [], error: 'Missing auth/groupId' };
-    const win = await ensureScraperWindow();
+    const win = await ensureScraperWindow(auth.userAgent);
     try {
       await setZaloCookies(auth.cookies);
-      // Load Zalo Web
+      // Load Zalo Web - directly to chat
       await win.loadURL('https://chat.zalo.me/');
-      // Wait for app to load
+      // Wait for app to load, handle landing page "Dùng bản web"
       await new Promise((r) => setTimeout(r, 8000));
+      const landed = await win.webContents.executeJavaScript(`
+        (async () => {
+          const btn = Array.from(document.querySelectorAll('a, button')).find(el => el.textContent.includes('Dùng bản web'));
+          if (btn) { btn.click(); return true; }
+          return false;
+        })()
+      `);
+      if (landed) await new Promise((r) => setTimeout(r, 8000));
       // Try to find and click the group in conversation list, then open member list
       const result = await win.webContents.executeJavaScript(`
         (async () => {
