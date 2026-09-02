@@ -224,7 +224,31 @@ async function scanGroupMembers({ groupId, cookie, imei, userAgent }) {
     console.warn(`[scan] direct groupId scan failed for ${groupId}: ${e.message}`);
   }
 
-  // 1c) Nếu vẫn không có link: thử bật link (như Deplao/tool khác) — được phép mọi cách
+  // 1c) Thử qua invite-box (api/group/inv-box/inv-info) — endpoint khác, nhiều group ẩn vẫn trả
+  try {
+    const members = [];
+    const seen = new Set();
+    for (let page = 1; page <= 20; page += 1) {
+      const res = await api.getGroupInviteBoxInfo({ groupId, mcount: 100, mpage: page });
+      const g = res?.groupInfo;
+      if (!g) break;
+      for (const m of g.currentMems || []) {
+        const member = normalizeMember(m);
+        if (/^\d+$/.test(member.userId) && !seen.has(member.userId)) { seen.add(member.userId); members.push(member); }
+      }
+      // Nếu không có phân trang riêng, dừng sau 1 trang
+      if (!g.hasMoreMember) break;
+    }
+    if (members.length > 2) {
+      console.warn(`[scan] invite-box scan got ${members.length} members for ${groupId}`);
+      return members;
+    }
+    if (members.length > 0) console.warn(`[scan] invite-box scan only ${members.length} for ${groupId}`);
+  } catch (e) {
+    console.warn(`[scan] invite-box scan failed for ${groupId}: ${e.message}`);
+  }
+
+  // 1d) Nếu vẫn không có link: thử bật link (như Deplao/tool khác) — được phép mọi cách
   try {
     const enabled = await api.enableGroupLink(groupId);
     const newLink = enabled?.link;
