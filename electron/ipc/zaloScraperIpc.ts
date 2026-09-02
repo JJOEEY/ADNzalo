@@ -71,68 +71,81 @@ export function registerZaloScraperIpc() {
     const win = await ensureScraperWindow(auth.userAgent);
     try {
       await setZaloCookies(auth.cookies);
-      // Load Zalo Web - directly to chat
-      await win.loadURL('https://chat.zalo.me/');
-      // Wait for app to load, handle landing page "Dùng bản web"
-      await new Promise((r) => setTimeout(r, 8000));
-      const landed = await win.webContents.executeJavaScript(`
-        (async () => {
-          const btn = Array.from(document.querySelectorAll('a, button')).find(el => el.textContent.includes('Dùng bản web'));
-          if (btn) { btn.click(); return true; }
-          return false;
-        })()
-      `);
-      if (landed) await new Promise((r) => setTimeout(r, 8000));
+      // Load Zalo Web directly to group via gid param (tránh tìm DOM text)
+      const targetUrl = `https://chat.zalo.me/?gid=${groupId}`;
+      const currentUrl = win.webContents.getURL();
+      if (!currentUrl.includes('chat.zalo.me')) {
+        await win.loadURL(targetUrl);
+        await new Promise((r) => setTimeout(r, 6000));
+        const landed = await win.webContents.executeJavaScript(`
+          (() => {
+            const btn = Array.from(document.querySelectorAll('a, button')).find(el => el.textContent.includes('Dùng bản web'));
+            if (btn) { btn.click(); return true; }
+            return false;
+          })()
+        `);
+        if (landed) await new Promise((r) => setTimeout(r, 6000));
+      } else if (!currentUrl.includes(groupId)) {
+        // Đã ở chat.zalo.me nhưng chưa đúng group -> navigate
+        await win.loadURL(targetUrl);
+        await new Promise((r) => setTimeout(r, 4000));
+      }
       // Try to find and click the group in conversation list, then open member list
       const result = await win.webContents.executeJavaScript(`
         (async () => {
           const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-          // Helper to find group element by groupId in DOM
-          const findGroupEl = () => {
+          // Thử click group qua URL hash nếu còn
+          if (!location.href.includes('${groupId}')) {
             const all = document.querySelectorAll('[data-id]');
             for (const el of all) {
-              if (el.getAttribute('data-id')?.includes('${groupId}') || el.textContent?.includes('${groupId}')) return el;
-            }
-            return null;
-          };
-          let groupEl = findGroupEl();
-          if (!groupEl) {
-            // Fallback: search in conversation list items
-            const items = document.querySelectorAll('.conv-item, [class*="conv"], [class*="thread"]');
-            for (const it of items) {
-              if (it.textContent?.includes('${groupId}')) { groupEl = it; break; }
+              if (el.getAttribute('data-id')?.includes('${groupId}')) { el.click(); break; }
             }
           }
-          if (groupEl) groupEl.click();
-          await sleep(3000);
-          // Try to open group info / member list
-          const infoBtn = document.querySelector('[data-translate*="info"], [title*="Thông tin"], [class*="group-info"], [class*="member"]');
-          if (infoBtn) infoBtn.click();
-          await sleep(3000);
-          // Collect member elements - try multiple selectors
+          await sleep(2000);
+          // Try to open group info / member list - thử nhiều selector
+          const tryClick = (sel) => { const el = document.querySelector(sel); if (el) { el.click(); return true; } return false; };
+          tryClick('[data-translate*="info"]');
+          tryClick('[title*="Thông tin"]');
+          tryClick('[class*="group-info"]');
+          // Nút xem thành viên thường là "Xem tất cả" hoặc số thành viên
+          const memberBtn = Array.from(document.querySelectorAll('a, button, span')).find(el => /\\d+\\s*thành viên|Xem tất cả/i.test(el.textContent));
+          if (memberBtn) memberBtn.click();
+          await sleep(2000);
+          // Collect member elements - try multiple selectors + scroll vét ảo
           const selectors = [
             '[class*="member"]',
             '[class*="Member"]',
             '[data-id*="member"]',
             '.user-item',
             '[class*="user"]',
+            '[class*="avatar"]',
           ];
           let members = [];
-          for (const sel of selectors) {
-            const els = document.querySelectorAll(sel);
-            if (els.length > 5) {
+          const seenIds = new Set();
+          const seenNames = new Set();
+          const scrollEl = document.querySelector('[class*="member-list"]') || document.querySelector('[class*="scroll"]') || document.querySelector('[role="dialog"]') || document.querySelector('.ReactVirtualized__Grid');
+          for (let iter = 0; iter < 25; iter++) {
+            for (const sel of selectors) {
+              const els = document.querySelectorAll(sel);
               for (const el of els) {
-                const name = el.textContent?.trim() || '';
-                const id = el.getAttribute('data-id') || el.getAttribute('data-uid') || '';
-                if (name && el.innerHTML.includes('avatar')) members.push({ name, id, html: el.outerHTML.slice(0,500) });
+                const name = el.textContent?.trim()?.split('\\n')[0]?.trim() || '';
+                const id = el.getAttribute('data-id') || el.getAttribute('data-uid') || el.getAttribute('data-userid') || '';
+                const key = id || name;
+                if (name && name.length > 1 && name.length < 50 && el.innerHTML.includes('avatar') && !seenNames.has(key)) {
+                  seenNames.add(key);
+                  members.push({ name, id, html: el.outerHTML.slice(0,500) });
+                }
               }
-              if (members.length > 0) break;
             }
+            if (scrollEl) (scrollEl as HTMLElement).scrollTop = (scrollEl as HTMLElement).scrollHeight;
+            else window.scrollTo(0, document.body.scrollHeight);
+            await sleep(600);
+            if (members.length >= 650) break;
           }
           // Dump page HTML snippet for debugging
           const htmlLen = document.documentElement.outerHTML.length;
           const bodyText = document.body.innerText.slice(0,2000);
-          return { foundGroup: !!groupEl, members, htmlLen, bodyText, url: location.href };
+          return { foundGroup: true, members, htmlLen, bodyText, url: location.href };
         })()
       `);
       // Save HTML for debugging selectors
