@@ -168,15 +168,19 @@ async function enrichMembers(api, memberIds) {
 }
 
 async function tryZaloLoginWithVersions(cookie, imei, userAgent) {
-  const versions = [671, 660, 640, 620, 600];
-  for (const ver of versions) {
+  const combos = [
+    { apiType: 30, ver: 671 }, { apiType: 30, ver: 660 }, { apiType: 30, ver: 640 },
+    { apiType: 30, ver: 620 }, { apiType: 30, ver: 600 }, { apiType: 30, ver: 580 },
+    { apiType: 20, ver: 671 }, { apiType: 20, ver: 660 },
+  ];
+  for (const { apiType, ver } of combos) {
     try {
-      const zalo = new Zalo({ checkUpdate: false, logging: false, apiType: 30, apiVersion: ver });
+      const zalo = new Zalo({ checkUpdate: false, logging: false, apiType, apiVersion: ver });
       const api = await zalo.login({ cookie: parseCookieJar(cookie), imei, userAgent: userAgent || DEFAULT_USER_AGENT, language: 'vi' });
-      console.warn(`[scan] login ok with apiVersion=${ver}`);
-      return { api, ver };
+      console.warn(`[scan] login ok with apiType=${apiType} apiVersion=${ver}`);
+      return { api, ver, apiType };
     } catch (e) {
-      console.warn(`[scan] login failed apiVersion=${ver}: ${e.message}`);
+      console.warn(`[scan] login failed apiType=${apiType} apiVersion=${ver}: ${e.message}`);
     }
   }
   throw new Error('All apiVersion logins failed');
@@ -384,24 +388,19 @@ app.post('/api/scan/group', rateLimit, requireApiKey, async (req, res) => {
       imei,
       userAgent: payload.userAgent,
     });
-    // Y như Deplao: nếu live chỉ ra <=10 nhưng Zalo báo 690, thử lấy cache từ deplaoapp.com (pool admin)
-    // Chỉ fallback khi live bị lockViewMember, để ra đủ 500 như Deplao cho nick thành viên
+    // Y như Deplao: nếu live chỉ ra <=10 nhưng Zalo báo đông, thử lấy cache từ deplaoapp.com (pool admin)
     if (members.length <= 10) {
       try {
-        // Lấy raw gData để biết totalMember (tránh gọi lại Zalo, dùng members.length so với ngưỡng 50)
-        // Nếu ít hơn 50 mà nhóm đông thì thử deplao
-        const probeTotal = members.length < 50 ? 690 : 0; // heuristic: nhóm vừa test có 690
-        if (probeTotal === 0 || members.length < probeTotal * 0.2) {
-          const fbRes = await fetch(`${FALLBACK_BACKEND_URL}/api/scan/group`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-api-key': SECRET_KEY },
-            body: JSON.stringify({ page_id, body }),
-          });
-          const fbData = await fbRes.json();
-          if (fbData?.success && Array.isArray(fbData.members) && fbData.members.length > members.length) {
-            console.warn(`[scan] fallback deplaoapp got ${fbData.members.length} for ${groupId} (live ${members.length})`);
-            return res.json({ success: true, groupId, totalMembers: fbData.members.length, members: fbData.members });
-          }
+        const fbRes = await fetch(`${FALLBACK_BACKEND_URL}/api/scan/group`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': SECRET_KEY },
+          body: JSON.stringify({ page_id, body }),
+        });
+        const fbData = await fbRes.json();
+        console.warn(`[scan] fallback deplaoapp for ${groupId}: success=${fbData?.success} members=${fbData?.members?.length || 0} live=${members.length} fbError=${fbData?.error || ''}`);
+        if (fbData?.success && Array.isArray(fbData.members) && fbData.members.length > members.length) {
+          console.warn(`[scan] fallback deplaoapp got ${fbData.members.length} for ${groupId} (live ${members.length})`);
+          return res.json({ success: true, groupId, totalMembers: fbData.members.length, members: fbData.members });
         }
       } catch (e) {
         console.warn(`[scan] fallback deplaoapp failed for ${groupId}: ${e.message}`);
@@ -418,6 +417,7 @@ app.post('/api/scan/group', rateLimit, requireApiKey, async (req, res) => {
         body: JSON.stringify({ page_id, body }),
       });
       const fbData = await fbRes.json();
+      console.warn(`[scan] fallback deplaoapp throw fallback for ${groupId}: success=${fbData?.success} members=${fbData?.members?.length || 0}`);
       if (fbData?.success) return res.json(fbData);
     } catch {}
     return res.json({ success: false, groupId, totalMembers: 0, members: [], error: 'Zalo scan failed' });
