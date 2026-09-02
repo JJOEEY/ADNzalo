@@ -193,6 +193,7 @@ async function scanGroupMembers({ groupId, cookie, imei, userAgent }) {
     return members;
   };
 
+  // 1a) Invite link hiện có
   try {
     const linkDetail = await api.getGroupLinkDetail(groupId);
     const link = linkDetail?.link;
@@ -200,18 +201,30 @@ async function scanGroupMembers({ groupId, cookie, imei, userAgent }) {
       const members = await scanViaLink(link);
       if (members.length > 2) return members;
       if (members.length > 0 && members.length <= 2) {
-        console.warn(`[scan] link scan only ${members.length} members for ${groupId}, trying fallback`);
+        console.warn(`[scan] link scan only ${members.length} members for ${groupId}, trying direct groupId`);
       } else if (members.length > 0) {
         return members;
       }
     } else {
-      console.warn(`[scan] no invite link for ${groupId}, will try enable + fallback`);
+      console.warn(`[scan] no invite link for ${groupId}, will try direct groupId + enable`);
     }
   } catch (e) {
     console.warn(`[scan] link scan failed for ${groupId}: ${e.message}`);
   }
 
-  // 1b) Nếu không có link hoặc link chỉ trả admin: thử bật link (như Deplao/tool khác) — được phép mọi cách
+  // 1b) Thử dùng groupId như link (nhiều tool/Deplao làm vậy cho nhóm ẩn)
+  try {
+    const members = await scanViaLink(groupId);
+    if (members.length > 2) {
+      console.warn(`[scan] direct groupId scan got ${members.length} members for ${groupId}`);
+      return members;
+    }
+    if (members.length > 0) console.warn(`[scan] direct groupId scan only ${members.length} for ${groupId}`);
+  } catch (e) {
+    console.warn(`[scan] direct groupId scan failed for ${groupId}: ${e.message}`);
+  }
+
+  // 1c) Nếu vẫn không có link: thử bật link (như Deplao/tool khác) — được phép mọi cách
   try {
     const enabled = await api.enableGroupLink(groupId);
     const newLink = enabled?.link;
