@@ -267,6 +267,8 @@ async function scanGroupMembers({ groupId, cookie, imei, userAgent }) {
   const gData = gridMap[groupId] ?? Object.values(gridMap)[0];
   if (!gData) throw new Error('Cannot fetch group info');
 
+  console.warn(`[scan] getGroupInfo raw for ${groupId}: keys=${Object.keys(gData).join(',')} totalMember=${gData.totalMember} hasMoreMember=${gData.hasMoreMember} type=${gData.type} subType=${gData.subType} lockViewMember=${gData.setting?.lockViewMember} creatorId=${gData.creatorId} adminIds=${(gData.adminIds||[]).length} memberIds=${(gData.memberIds||[]).length} currentMems=${(gData.currentMems||[]).length} updateMems=${(gData.updateMems||[]).length} admins=${(gData.admins||[]).length} memVerList=${Array.isArray(gData.memVerList)?gData.memVerList.length:Object.keys(gData.memVerList||{}).length}`);
+
   const creatorId = String(gData.creatorId || '').replace(/_0$/, '');
   const adminIds = (gData.adminIds || []).map((a) => String(a).replace(/_0$/, ''));
   const adminSet = new Set([creatorId, ...adminIds].filter(Boolean));
@@ -275,8 +277,40 @@ async function scanGroupMembers({ groupId, cookie, imei, userAgent }) {
 
   // Nếu Zalo chỉ trả trưởng/phó (<=2) và totalMember báo lớn hơn thì đây là giới hạn quyền, báo rõ
   const totalReported = Number(gData.totalMember || 0);
-  if (memberIds.length <= 2 && totalReported > memberIds.length) {
-    console.warn(`[scan] getGroupInfo limited to ${memberIds.length}/${totalReported} for ${groupId} (lockViewMember?)`);
+  if (memberIds.length <= 10 && totalReported > memberIds.length) {
+    console.warn(`[scan] getGroupInfo limited to ${memberIds.length}/${totalReported} for ${groupId} (lockViewMember=${gData.setting?.lockViewMember}), trying chat-history fallback`);
+    // 2b) Vét lịch sử chat để gom senderId (không cần quyền xem danh sách) — mọi cách
+    try {
+      const historyMembers = await (async () => {
+        const seen = new Set(memberIds);
+        const collected = [];
+        // Thử lấy 500 tin gần nhất, gom sender
+        try {
+          const hist = await api.getGroupChatHistory(groupId, 500);
+          for (const msg of hist?.groupMsgs || []) {
+            const uid = String(msg.senderId || msg.authorId || msg.uid || '').replace(/_0$/, '');
+            if (/^\d+$/.test(uid) && !seen.has(uid)) { seen.add(uid); collected.push(uid); }
+            const mentions = msg.mentions || msg.atMembers || [];
+            for (const m of mentions) { const mid = String(m.uid || m.id || '').replace(/_0$/, ''); if (/^\d+$/.test(mid) && !seen.has(mid)) { seen.add(mid); collected.push(mid); } }
+          }
+          console.warn(`[scan] chat-history collected ${collected.length} extra uids for ${groupId} (total ${seen.size})`);
+        } catch (e) {
+          console.warn(`[scan] chat-history failed for ${groupId}: ${e.message}`);
+        }
+        if (collected.length > 0) {
+          // Trả về tập hợp mới (cũ + mới) để enrich
+          return [...memberIds, ...collected];
+        }
+        return null;
+      })();
+      if (historyMembers && historyMembers.length > memberIds.length) {
+        const enrichedHist = await enrichMembers(api, historyMembers);
+        if (enrichedHist.length > memberIds.length) {
+          console.warn(`[scan] using chat-history enriched ${enrichedHist.length} for ${groupId}`);
+          return enrichedHist;
+        }
+      }
+    } catch {}
   }
 
   const enriched = await enrichMembers(api, memberIds);
