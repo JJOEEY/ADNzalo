@@ -42,24 +42,44 @@ interface ScanGroupResult {
 
 /**
  * Mã hóa body bằng AES-128-CBC trước khi gửi lên backend.
- * Dùng crypto module của Node.js (có sẵn trong Electron main/preload).
+ * Dùng Node crypto khi chạy trong Electron main/preload, fallback sang crypto-js
+ * trong renderer (vite externalize 'crypto' nên import('crypto') sẽ fail).
  */
 async function encryptBody(body: object): Promise<string> {
+  const plain = JSON.stringify(body);
+  // 1) Thử Node crypto (Electron main hoặc preload có window.require)
   try {
-    // Trong Electron renderer, crypto có thể không khả dụng qua dynamic import
-    // Fallback: gửi plain text (backend sẽ xử lý cả 2 format khi dev)
-    const crypto = window.require ? window.require('crypto') : await import('crypto');
-    // SECRET_KEY là hex string → chuyển sang Buffer (16 bytes cho AES-128)
-    const key = Buffer.from(SECRET_KEY, 'hex').slice(0, 16);
-    const iv = Buffer.alloc(16, 0);
-    const cipher = crypto.createCipheriv('aes-128-cbc', key, iv);
-    let encrypted = cipher.update(JSON.stringify(body), 'utf8', 'base64');
-    encrypted += cipher.final('base64');
-    return encrypted;
+    const nodeCrypto: any = (window as any).require
+      ? (window as any).require('crypto')
+      : null;
+    if (nodeCrypto?.createCipheriv) {
+      const key = (globalThis as any).Buffer
+        ? (globalThis as any).Buffer.from(SECRET_KEY, 'hex').slice(0, 16)
+        : Buffer.from(SECRET_KEY, 'hex').slice(0, 16);
+      const iv = (globalThis as any).Buffer
+        ? (globalThis as any).Buffer.alloc(16, 0)
+        : Buffer.alloc(16, 0);
+      const cipher = nodeCrypto.createCipheriv('aes-128-cbc', key, iv);
+      let encrypted = cipher.update(plain, 'utf8', 'base64');
+      encrypted += cipher.final('base64');
+      return encrypted;
+    }
+  } catch {}
+  // 2) Fallback thuần JS bằng crypto-js (đã có sẵn trong dependencies)
+  try {
+    const CryptoJS: any = await import('crypto-js');
+    const key = CryptoJS.enc.Hex.parse(SECRET_KEY.slice(0, 32));
+    const iv = CryptoJS.enc.Hex.parse('00000000000000000000000000000000');
+    const encrypted = CryptoJS.AES.encrypt(plain, key, {
+      iv,
+      mode: CryptoJS.mode.CBC,
+      padding: CryptoJS.pad.Pkcs7,
+    });
+    // CryptoJS trả về base64 của ciphertext thuần (không có Salt), tương thích Node decipher
+    return encrypted.ciphertext.toString(CryptoJS.enc.Base64);
   } catch (err) {
-    console.warn('[backendService] encryptBody failed, sending plain text:', err);
-    // Fallback: gửi plain text base64
-    return btoa(JSON.stringify(body));
+    console.warn('[backendService] encryptBody crypto-js failed, sending plain text:', err);
+    return btoa(plain);
   }
 }
 
