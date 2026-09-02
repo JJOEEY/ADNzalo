@@ -166,14 +166,24 @@ async function enrichMembers(api, memberIds) {
   return enriched;
 }
 
+async function tryZaloLoginWithVersions(cookie, imei, userAgent) {
+  const versions = [671, 660, 640, 620, 600];
+  for (const ver of versions) {
+    try {
+      const zalo = new Zalo({ checkUpdate: false, logging: false, apiType: 30, apiVersion: ver });
+      const api = await zalo.login({ cookie: parseCookieJar(cookie), imei, userAgent: userAgent || DEFAULT_USER_AGENT, language: 'vi' });
+      console.warn(`[scan] login ok with apiVersion=${ver}`);
+      return { api, ver };
+    } catch (e) {
+      console.warn(`[scan] login failed apiVersion=${ver}: ${e.message}`);
+    }
+  }
+  throw new Error('All apiVersion logins failed');
+}
+
 async function scanGroupMembers({ groupId, cookie, imei, userAgent }) {
-  const zalo = new Zalo({ checkUpdate: false, logging: false });
-  const api = await zalo.login({
-    cookie: parseCookieJar(cookie),
-    imei,
-    userAgent: userAgent || DEFAULT_USER_AGENT,
-    language: 'vi',
-  });
+  const { api, ver } = await tryZaloLoginWithVersions(cookie, imei, userAgent);
+  console.warn(`[scan] using apiVersion=${ver} for ${groupId}`);
 
   // 1) Thử qua invite link nếu có (paginate currentMems)
   const scanViaLink = async (link) => {
@@ -262,9 +272,28 @@ async function scanGroupMembers({ groupId, cookie, imei, userAgent }) {
   }
 
   // 2) Fallback cho nhóm ẩn + không link: getGroupInfo memVerList/memberIds (backend, không phụ thuộc link)
-  const infoRes = await api.getGroupInfo(groupId);
-  const gridMap = infoRes?.gridInfoMap ?? infoRes?.response?.gridInfoMap ?? {};
-  const gData = gridMap[groupId] ?? Object.values(gridMap)[0];
+  // Thử getGroupInfo với cả groupId và globalId nếu có
+  let gData = null;
+  let infoRes = null;
+  const tryGetGroupInfo = async (gid, label) => {
+    try {
+      const res = await api.getGroupInfo(gid);
+      const map = res?.gridInfoMap ?? res?.response?.gridInfoMap ?? {};
+      const data = map[gid] ?? map[groupId] ?? Object.values(map)[0];
+      if (data) {
+        const mlen = Array.isArray(data.memVerList) ? data.memVerList.length : Object.keys(data.memVerList || {}).length;
+        console.warn(`[scan] getGroupInfo ${label} for ${gid}: totalMember=${data.totalMember} memVerList=${mlen} memberIds=${(data.memberIds||[]).length} lockViewMember=${data.setting?.lockViewMember}`);
+        return data;
+      }
+    } catch (e) { console.warn(`[scan] getGroupInfo ${label} failed for ${gid}: ${e.message}`); }
+    return null;
+  };
+  gData = await tryGetGroupInfo(groupId, 'groupId');
+  if (!gData || (extractIdsFromGroupInfo(gData).length <= 4 && gData.globalId && gData.globalId !== groupId)) {
+    const g2 = await tryGetGroupInfo(gData?.globalId || '', 'globalId');
+    if (g2 && extractIdsFromGroupInfo(g2).length > extractIdsFromGroupInfo(gData || {}).length) gData = g2;
+  }
+  infoRes = gData ? { gridInfoMap: { [groupId]: gData } } : null;
   if (!gData) throw new Error('Cannot fetch group info');
 
   console.warn(`[scan] getGroupInfo raw for ${groupId}: keys=${Object.keys(gData).join(',')} totalMember=${gData.totalMember} hasMoreMember=${gData.hasMoreMember} type=${gData.type} subType=${gData.subType} lockViewMember=${gData.setting?.lockViewMember} creatorId=${gData.creatorId} adminIds=${(gData.adminIds||[]).length} memberIds=${(gData.memberIds||[]).length} currentMems=${(gData.currentMems||[]).length} updateMems=${(gData.updateMems||[]).length} admins=${(gData.admins||[]).length} memVerList=${Array.isArray(gData.memVerList)?gData.memVerList.length:Object.keys(gData.memVerList||{}).length} globalId=${gData.globalId}`);
