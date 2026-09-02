@@ -168,16 +168,19 @@ async function enrichMembers(api, memberIds) {
 }
 
 const apiCache = new Map();
-async function getCachedApi(pageId, cookie, imei, userAgent) {
+async function getCachedApi(pageId, cookie, imei, userAgent, forceRefresh = false) {
   const key = `${pageId}:${imei}`;
+  // Nếu cookie đổi (sau khi đăng nhập lại) thì xóa cache cũ
+  const cookieHash = String(cookie).slice(0, 64);
   const cached = apiCache.get(key);
-  if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
+  if (!forceRefresh && cached && Date.now() - cached.ts < 5 * 60 * 1000 && cached.cookieHash === cookieHash) {
     console.warn(`[scan] reuse cached api for ${pageId}`);
     return cached.api;
   }
+  if (cached && cached.cookieHash !== cookieHash) console.warn(`[scan] cookie changed for ${pageId}, refreshing login`);
   const zalo = new Zalo({ checkUpdate: false, logging: false, apiType: 30, apiVersion: 671 });
   const api = await zalo.login({ cookie: parseCookieJar(cookie), imei, userAgent: userAgent || DEFAULT_USER_AGENT, language: 'vi' });
-  apiCache.set(key, { api, ts: Date.now() });
+  apiCache.set(key, { api, ts: Date.now(), cookieHash });
   console.warn(`[scan] login ok for ${pageId}`);
   return api;
 }
@@ -376,14 +379,34 @@ app.post('/api/scan/group', rateLimit, requireApiKey, async (req, res) => {
     return res.status(400).json({ success: false, groupId, totalMembers: 0, members: [], error: 'Missing or invalid groupId/cookie/imei' });
   }
 
+  let members;
   try {
-    const members = await scanGroupMembers({
+    members = await scanGroupMembers({
       groupId,
       cookie,
       imei,
       userAgent: payload.userAgent,
       pageId: page_id,
     });
+  } catch (e) {
+    const msg = String(e.message || '');
+    if (msg.includes('zpw_sek') || msg.includes('Đăng nhập')) {
+      console.warn(`[scan] clearing cache and retry once for ${page_id} due to ${msg}`);
+      apiCache.delete(`${page_id}:${imei}`);
+      try {
+        members = await scanGroupMembers({ groupId, cookie, imei, userAgent: payload.userAgent, pageId: page_id });
+      } catch (e2) {
+        console.error('[scan/group] retry failed:', e2.message);
+        if (msg.includes('Đăng nhập') || e2.message.includes('Đăng nhập')) {
+          return res.json({ success: false, groupId, totalMembers: 0, members: [], error: 'Phiên Zalo hết hạn, vui lòng đăng nhập lại nick này trong ADNzalo' });
+        }
+        throw e2;
+      }
+    } else {
+      throw e;
+    }
+  }
+  try {
     // Y như Deplao: nếu live chỉ ra <=10 nhưng Zalo báo đông, thử lấy cache từ deplaoapp.com (pool admin)
     if (members.length <= 10) {
       try {
