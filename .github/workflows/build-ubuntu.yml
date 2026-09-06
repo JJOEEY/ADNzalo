@@ -53,7 +53,7 @@ jobs:
           cache: 'npm'
 
       - name: 🟢 Setup Go 1.x
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: 'stable'
           cache: false  # don't cache Go modules - meta clone is side-effect
