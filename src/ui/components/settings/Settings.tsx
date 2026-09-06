@@ -229,64 +229,35 @@ export default function Settings() {
               <div className="space-y-4">
                 <div>
                   <p className="text-sm text-gray-200 font-medium mb-3">Chủ đề màu sắc</p>
-                  <div className="flex gap-3">
-                    {/* Dark theme option */}
-                    <button
-                      onClick={() => setTheme('dark')}
-                      className={`flex-1 flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${
-                        theme === 'dark'
-                          ? 'border-blue-500 bg-blue-600/10'
-                          : 'border-gray-600 hover:border-gray-500'
-                      }`}
-                    >
-                      <div className="w-full h-14 rounded-lg bg-gray-900 border border-gray-700 flex items-end p-1.5 gap-1 overflow-hidden">
-                        <div className="w-6 h-10 rounded bg-gray-800 flex-shrink-0" />
-                        <div className="flex-1 flex flex-col gap-1">
-                          <div className="h-3 rounded bg-gray-700 w-3/4" />
-                          <div className="h-2 rounded bg-blue-600 w-1/2 self-end" />
-                          <div className="h-2 rounded bg-gray-700 w-2/3" />
-                        </div>
+                  {/* ADNzalo "Tối Executive": chỉ còn chủ đề tối */}
+                  <button
+                    onClick={() => setTheme('dark')}
+                    className={`w-full flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${
+                      theme === 'dark'
+                        ? 'border-blue-500 bg-blue-600/10'
+                        : 'border-gray-600 hover:border-gray-500'
+                    }`}
+                  >
+                    <div className="w-full h-14 rounded-lg bg-gray-900 border border-gray-700 flex items-end p-1.5 gap-1 overflow-hidden">
+                      <div className="w-6 h-10 rounded bg-gray-800 flex-shrink-0" />
+                      <div className="flex-1 flex flex-col gap-1">
+                        <div className="h-3 rounded bg-gray-700 w-3/4" />
+                        <div className="h-2 rounded bg-blue-600 w-1/2 self-end" />
+                        <div className="h-2 rounded bg-gray-700 w-2/3" />
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        {theme === 'dark' && (
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="text-blue-400">
-                            <path d="M20 6L9 17l-5-5" stroke="currentColor" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-                          </svg>
-                        )}
-                        <span className={`text-xs font-medium ${theme === 'dark' ? 'text-blue-400' : 'text-gray-400'}`}><MinimizeIcon className="w-4 h-4 inline" /> Tối</span>
-                      </div>
-                    </button>
-
-                    {/* Light theme option */}
-                    <button
-                      onClick={() => setTheme('light')}
-                      className={`flex-1 flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${
-                        theme === 'light'
-                          ? 'border-blue-500 bg-blue-600/10'
-                          : 'border-gray-600 hover:border-gray-500'
-                      }`}
-                    >
-                      <div className="w-full h-14 rounded-lg border border-stone-200 flex items-end p-1.5 gap-1 overflow-hidden" style={{ backgroundColor: '#f7f6f3' }}>
-                        <div className="w-6 h-10 rounded flex-shrink-0" style={{ backgroundColor: '#e8e4de' }} />
-                        <div className="flex-1 flex flex-col gap-1">
-                          <div className="h-3 rounded w-3/4" style={{ backgroundColor: '#e3dfd8' }} />
-                          <div className="h-2 rounded bg-blue-500 w-1/2 self-end" />
-                          <div className="h-2 rounded w-2/3" style={{ backgroundColor: '#e3dfd8' }} />
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        {theme === 'light' && (
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="text-blue-400">
-                            <path d="M20 6L9 17l-5-5" stroke="currentColor" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-                          </svg>
-                        )}
-                        <span className={`text-xs font-medium ${theme === 'light' ? 'text-blue-400' : 'text-gray-400'}`}><SunIcon className="w-4 h-4 inline" /> Sáng</span>
-                      </div>
-                    </button>
-                  </div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {theme === 'dark' && (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="text-blue-400">
+                          <path d="M20 6L9 17l-5-5" stroke="currentColor" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      )}
+                      <span className={`text-xs font-medium ${theme === 'dark' ? 'text-blue-400' : 'text-gray-400'}`}><MinimizeIcon className="w-4 h-4 inline" /> Tối</span>
+                    </div>
+                  </button>
                 </div>
                 <p className="text-xs text-gray-400 leading-relaxed">
-                  Thay đổi giao diện áp dụng ngay lập tức và được lưu tự động.
+                  ADNzalo dùng chủ đề Tối Executive — navy đậm của ADN Capital, accent cyan.
                 </p>
               </div>
             </Section>

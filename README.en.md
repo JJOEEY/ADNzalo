@@ -20,7 +20,6 @@ Built for ADN Capital: hidden group-member scan, phone/UID campaigns, Boss↔Emp
 
 </div>
 
-> **Origin:** Fork of `babyvibe/deplao-builder v26.8.5` (MIT), rebranded as **ADNzalo v1.0.0** for ADN Capital. Keeps **Zalo + CRM + Campaign + AI + Workflow**, removes default POS/ERP, adds ADN customizations (gpt-5.6-luna, per-account proxy, free hidden-member scan).
 
 ---
 
@@ -140,7 +139,7 @@ npm run production
 
 ### Local data
 
-- SQLite at `%APPDATA%\ADNzalo\adnzalo-tool.db` (migrated from `deplao-tool.db`)
+- SQLite at `%APPDATA%\ADNzalo\adnzalo-tool.db`
 - Media at `%APPDATA%\ADNzalo\media\`
 - Change storage folder in `Settings → Storage`
 - Auto-update disabled by default (`ADN_DISABLE_AUTOUPDATE=true`)
@@ -211,7 +210,6 @@ flowchart LR
 
 - Stable 24/7 internet for sync & automation
 - Keep app running for workflows / team ops
-- Close old Deplao when running ADNzalo to avoid DB contention
 
 ---
 
@@ -219,11 +217,10 @@ flowchart LR
 
 - Website: [https://adncapital.com.vn](https://adncapital.com.vn) · Fanpage: [https://fb.com/adnzalo](https://fb.com/adnzalo)
 - Issues: [https://github.com/JJOEEY/ADNzalo/issues](https://github.com/JJOEEY/ADNzalo/issues)
-- Affiliate: [https://adncapital.com.vn/affiliate](https://adncapital.com.vn/affiliate)
 
 ## 🙏 Acknowledgements
 
-Thanks to original `babyvibe/deplao-builder` and libraries: zca-js, fbchat-v2, and open-source community.
+Thanks to the open-source libraries: zca-js, fbchat-v2, and the community.
 
 ---
 

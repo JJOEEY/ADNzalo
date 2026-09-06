@@ -260,13 +260,9 @@ const loadFontSizeScale = (): number => {
   return 1;
 };
 
-// ─── theme persists in localStorage ─────────────────────────────────────────
+// ─── theme: ADNzalo "Tối Executive" — chủ đề tối là chuẩn duy nhất ──────────
 const loadTheme = (): AppTheme => {
-  try {
-    const stored = localStorage.getItem('app_theme');
-    if (stored === 'light' || stored === 'dark') return stored;
-  } catch {}
-  return 'light';
+  return 'dark';
 };
 
 // ─── notifSettings persists in localStorage (not account-specific) ──────────

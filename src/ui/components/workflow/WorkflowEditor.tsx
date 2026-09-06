@@ -429,7 +429,6 @@ export default function WorkflowEditor({ workflowId, onBack }: Props) {
     const wf = buildWorkflow();
     const exportData = {
       _adnzaloWorkflow: true,
-      _deplaoWorkflow: true,
       _version: 1,
       _exportedAt: new Date().toISOString(),
       channel: workflowMeta.channel,

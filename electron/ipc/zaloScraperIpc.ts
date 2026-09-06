@@ -1,11 +1,25 @@
 import { BrowserWindow, ipcMain, session } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
+
+// ── DOM scraper cho nhóm ẩn (lockViewMember) ───────────────────────────────
+// Web chat.zalo.me hiển thị danh sách thành viên theo quyền riêng của phiên
+// web, có thể nhiều hơn API mobile trả về. Mỗi tài khoản Zalo dùng 1 partition
+// riêng; lần đầu chưa có phiên web → hiện cửa sổ cho user quét QR một lần,
+// phiên được giữ lại cho các lần quét sau.
 
 let scraperWindow: BrowserWindow | null = null;
-let scraperSessionPartition = 'persist:zalo-scraper';
+let scraperPartition = '';
 
-async function ensureScraperWindow(userAgent?: string): Promise<BrowserWindow> {
+const LOGIN_WAIT_MS = 180_000; // chờ user quét QR tối đa 3 phút
+const LOGIN_POLL_MS = 3_000;
+
+function ensureScraperWindow(partition: string, userAgent?: string): BrowserWindow {
+  if (scraperWindow && !scraperWindow.isDestroyed() && scraperPartition !== partition) {
+    scraperWindow.destroy();
+    scraperWindow = null;
+  }
   if (scraperWindow && !scraperWindow.isDestroyed()) {
     if (userAgent) scraperWindow.webContents.setUserAgent(userAgent);
     return scraperWindow;
@@ -15,11 +29,12 @@ async function ensureScraperWindow(userAgent?: string): Promise<BrowserWindow> {
     height: 800,
     show: false,
     webPreferences: {
-      partition: scraperSessionPartition,
+      partition,
       nodeIntegration: false,
       contextIsolation: true,
     },
   });
+  scraperPartition = partition;
   if (userAgent) scraperWindow.webContents.setUserAgent(userAgent);
   scraperWindow.on('closed', () => { scraperWindow = null; });
   return scraperWindow;
@@ -45,8 +60,8 @@ function parseCookiesForElectron(cookiesJson: string): Array<{ url: string; name
   }
 }
 
-async function setZaloCookies(cookiesJson: string) {
-  const ses = session.fromPartition(scraperSessionPartition);
+async function setZaloCookies(partition: string, cookiesJson: string) {
+  const ses = session.fromPartition(partition);
   const cookies = parseCookiesForElectron(cookiesJson);
   for (const c of cookies) {
     try {
@@ -64,105 +79,169 @@ async function setZaloCookies(cookiesJson: string) {
   }
 }
 
+/** Kiểm tra trạng thái đăng nhập của chat.zalo.me trong cửa sổ scraper */
+async function checkLoginState(win: BrowserWindow): Promise<{ isLogin: boolean; url: string; title: string }> {
+  try {
+    return await win.webContents.executeJavaScript(`
+      (() => {
+        const title = document.title || '';
+        const body = document.body?.innerText || '';
+        const loginMarkers = title.includes('Đăng nhập') || body.includes('Quét mã QR') || body.includes('Đăng nhập tài khoản Zalo');
+        const hasApp = !!document.querySelector('#app, [class*="conversation"], [class*="chat-item"], [class*="sidebar"]');
+        return { isLogin: loginMarkers || (!hasApp && body.trim().length < 200), url: location.href, title };
+      })()
+    `);
+  } catch {
+    return { isLogin: true, url: '', title: '' };
+  }
+}
+
 export function registerZaloScraperIpc() {
-  ipcMain.handle('zalo:scrapeGroupMembers', async (_event, params: { auth: { cookies: string; imei: string; userAgent: string }; groupId: string }) => {
+  ipcMain.handle('zalo:scrapeGroupMembers', async (_event, params: { auth: { cookies: string; imei: string; userAgent: string }; accountKey?: string; groupId: string }) => {
     const { auth, groupId } = params;
     if (!auth?.cookies || !groupId) return { success: false, members: [], error: 'Missing auth/groupId' };
-    const win = await ensureScraperWindow(auth.userAgent);
+    // groupId được chèn vào URL và script executeJavaScript bên dưới — bắt buộc
+    // numeric để caller lạ không thể inject JS vào cửa sổ có phiên Zalo Web
+    if (!/^\d+$/.test(groupId)) return { success: false, members: [], error: 'Invalid groupId' };
+
+    // Partition theo tài khoản: giữ phiên web riêng cho từng nick
+    const accountKey = params.accountKey || auth.imei || 'default';
+    const partition = `persist:zalo-scraper-${accountKey}`;
+    const win = ensureScraperWindow(partition, auth.userAgent);
+
     try {
-      await setZaloCookies(auth.cookies);
-      // Load Zalo Web directly to group via gid param (tránh tìm DOM text)
-      const targetUrl = `https://chat.zalo.me/?gid=${groupId}`;
+      await setZaloCookies(partition, auth.cookies);
+      await win.loadURL(`https://chat.zalo.me/?gid=${groupId}`);
+      await new Promise((r) => setTimeout(r, 6000));
+
+      // Chưa có phiên web → hiện cửa sổ cho user quét QR, chờ tới khi đăng nhập xong
+      let state = await checkLoginState(win);
+      if (state.isLogin) {
+        try { await win.loadURL('https://chat.zalo.me/'); await new Promise((r) => setTimeout(r, 3000)); } catch {}
+        state = await checkLoginState(win);
+        if (state.isLogin) {
+          if (!win.isVisible()) win.show();
+          win.focus();
+          const deadline = Date.now() + LOGIN_WAIT_MS;
+          let loggedIn = false;
+          while (Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, LOGIN_POLL_MS));
+            if (scraperWindow !== win || win.isDestroyed()) {
+              return { success: false, members: [], error: 'Đã đóng cửa sổ đăng nhập Zalo Web' };
+            }
+            const s = await checkLoginState(win);
+            if (!s.isLogin) { loggedIn = true; break; }
+          }
+          if (!loggedIn) {
+            return { success: false, members: [], needsWebLogin: true, error: 'Chưa đăng nhập Zalo Web — cửa sổ đăng nhập vẫn mở, quét QR rồi thử lại' };
+          }
+          if (win.isVisible()) win.hide();
+        }
+      }
+
+      // Đảm bảo đang mở đúng nhóm
       const currentUrl = win.webContents.getURL();
-      if (!currentUrl.includes('chat.zalo.me')) {
-        await win.loadURL(targetUrl);
-        await new Promise((r) => setTimeout(r, 6000));
-        const landed = await win.webContents.executeJavaScript(`
-          (() => {
-            const btn = Array.from(document.querySelectorAll('a, button')).find(el => el.textContent.includes('Dùng bản web'));
-            if (btn) { btn.click(); return true; }
-            return false;
-          })()
-        `);
-        if (landed) await new Promise((r) => setTimeout(r, 6000));
-      } else if (!currentUrl.includes(groupId)) {
-        // Đã ở chat.zalo.me nhưng chưa đúng group -> navigate
-        await win.loadURL(targetUrl);
-        await new Promise((r) => setTimeout(r, 4000));
+      if (!currentUrl.includes(groupId)) {
+        await win.loadURL(`https://chat.zalo.me/?gid=${groupId}`);
+        await new Promise((r) => setTimeout(r, 5000));
       }
-      // Check if still on login/landing page
-      const isLogin = await win.webContents.executeJavaScript(`document.body.innerText.includes('Đăng nhập') || document.body.innerText.includes('Quét mã QR')`);
-      if (isLogin) {
-        return { success: false, members: [], error: 'Scraper not authenticated - skip', debug: { url: win.webContents.getURL() } };
-      }
-      // Try to find and click the group in conversation list, then open member list
+
+      // Thu hoạch danh sách thành viên từ DOM
       const result = await win.webContents.executeJavaScript(`
         (async () => {
           const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-          // Thử click group qua URL hash nếu còn
-          if (!location.href.includes('${groupId}')) {
-            const all = document.querySelectorAll('[data-id]');
-            for (const el of all) {
-              if (el.getAttribute('data-id')?.includes('${groupId}')) { el.click(); break; }
+          const gid = '${groupId}';
+          // 1) Mở hội thoại nhóm nếu chưa mở
+          if (!location.href.includes(gid)) {
+            const els = document.querySelectorAll('[data-id]');
+            for (const el of els) {
+              if ((el.getAttribute('data-id') || '').includes(gid)) { el.click(); break; }
             }
           }
-          await sleep(2000);
-          // Try to open group info / member list - thử nhiều selector
+          await sleep(2500);
+          // 2) Mở panel thông tin nhóm
           const tryClick = (sel) => { const el = document.querySelector(sel); if (el) { el.click(); return true; } return false; };
+          const clickByText = (re) => {
+            const el = Array.from(document.querySelectorAll('a, button, span, div[role="button"], div[title]'))
+              .find(el => re.test((el.textContent || '').trim()) && (el.offsetWidth || el.offsetHeight));
+            if (el) { el.click(); return true; }
+            return false;
+          };
           tryClick('[data-translate*="info"]');
           tryClick('[title*="Thông tin"]');
+          tryClick('[title*="Group info"]');
           tryClick('[class*="group-info"]');
-          // Nút xem thành viên thường là "Xem tất cả" hoặc số thành viên
-          const memberBtn = Array.from(document.querySelectorAll('a, button, span')).find(el => /\\d+\\s*thành viên|Xem tất cả/i.test(el.textContent));
-          if (memberBtn) memberBtn.click();
+          await sleep(1800);
+          // 3) Mở danh sách thành viên (nút số lượng thành viên / "Xem tất cả")
+          clickByText(/\\d+\\s*thành viên|Xem tất cả|Thành viên\\s*\\(|View members/i);
           await sleep(2000);
-          // Collect member elements - try multiple selectors + scroll vét ảo
-          const selectors = [
-            '[class*="member"]',
-            '[class*="Member"]',
-            '[data-id*="member"]',
-            '.user-item',
-            '[class*="user"]',
-            '[class*="avatar"]',
-          ];
-          let members = [];
+          // 4) Vét danh sách thành viên + scroll qua list ảo
+          const selectors = ['[class*="member"]', '[class*="Member"]', '[data-id*="member"]', '.user-item', '[class*="kt-item"]', '[class*="person"]'];
+          const members = [];
           const seenIds = new Set();
           const seenNames = new Set();
-          const scrollEl = document.querySelector('[class*="member-list"]') || document.querySelector('[class*="scroll"]') || document.querySelector('[role="dialog"]') || document.querySelector('.ReactVirtualized__Grid');
-          for (let iter = 0; iter < 25; iter++) {
+          const grab = () => {
+            // 4a) Theo selector + data-id
             for (const sel of selectors) {
-              const els = document.querySelectorAll(sel);
-              for (const el of els) {
-                const name = el.textContent?.trim()?.split('\\n')[0]?.trim() || '';
+              for (const el of document.querySelectorAll(sel)) {
+                const name = (el.textContent || '').trim().split('\\n')[0].trim();
                 const id = el.getAttribute('data-id') || el.getAttribute('data-uid') || el.getAttribute('data-userid') || '';
+                const hasAvatar = el.innerHTML.includes('avatar') || !!el.querySelector('img');
                 const key = id || name;
-                if (name && name.length > 1 && name.length < 50 && el.innerHTML.includes('avatar') && !seenNames.has(key)) {
+                if (name && name.length > 1 && name.length < 60 && hasAvatar && !seenNames.has(key)) {
                   seenNames.add(key);
-                  members.push({ name, id, html: el.outerHTML.slice(0,500) });
+                  members.push({ name, id: /^\\d{6,}$/.test(id) ? id : '' });
                 }
               }
             }
-            if (scrollEl) (scrollEl as HTMLElement).scrollTop = (scrollEl as HTMLElement).scrollHeight;
+            // 4b) Quét mọi phần tử data-id là UID Zalo (số dài) — bắt cả hàng ảo chưa render tên
+            for (const el of document.querySelectorAll('[data-id]')) {
+              const id = el.getAttribute('data-id') || '';
+              if (!/^\\d{10,}$/.test(id) || seenIds.has(id)) continue;
+              const name = (el.textContent || '').trim().split('\\n')[0].trim();
+              seenIds.add(id);
+              if (name && name.length > 1 && name.length < 60) members.push({ name, id });
+            }
+          };
+          const scrollEl = document.querySelector('[class*="member-list"]')
+            || document.querySelector('[class*="member"] [class*="scroll"]')
+            || document.querySelector('[role="dialog"] [class*="scroll"]')
+            || document.querySelector('.ReactVirtualized__Grid');
+          let stableRounds = 0;
+          let lastCount = 0;
+          for (let iter = 0; iter < 40; iter++) {
+            grab();
+            if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
             else window.scrollTo(0, document.body.scrollHeight);
             await sleep(600);
-            if (members.length >= 650) break;
+            grab();
+            if (members.length === lastCount) { stableRounds++; if (stableRounds >= 4) break; }
+            else stableRounds = 0;
+            lastCount = members.length;
+            if (members.length >= 1500) break;
           }
-          // Dump page HTML snippet for debugging
-          const htmlLen = document.documentElement.outerHTML.length;
-          const bodyText = document.body.innerText.slice(0,2000);
-          return { foundGroup: true, members, htmlLen, bodyText, url: location.href };
+          return { foundGroup: true, members, url: location.href };
         })()
       `);
-      // Save HTML for debugging selectors
+      const harvested = (result as any).members || [];
+
+      // Lưu HTML để debug selector nếu thu hoạch kém
       try {
         const html = await win.webContents.executeJavaScript('document.documentElement.outerHTML');
-        const outPath = path.join(require('os').tmpdir(), `adnzalo-scrape-${groupId}.html`);
-        fs.writeFileSync(outPath, String(html).slice(0, 2000000), 'utf8');
+        const outPath = path.join(os.tmpdir(), `adnzalo-scrape-${groupId}.html`);
+        fs.writeFileSync(outPath, String(html).slice(0, 2_000_000), 'utf8');
         (result as any).debugHtmlPath = outPath;
       } catch {}
-      // For now return scraped data (may be empty until selectors refined)
-      // Also enrich via getGroupMembersInfo if we got ids
-      return { success: true, members: (result as any).members || [], debug: result, error: (result as any).members?.length ? undefined : 'DOM scrape found 0 members - selectors need refinement' };
+
+      const members = harvested
+        .map((m: any) => ({ name: m.name, id: String(m.id || '') }))
+        .filter((m: any) => m.name);
+      return {
+        success: true,
+        members,
+        debug: { url: (result as any).url, count: members.length },
+        error: members.length ? undefined : 'DOM scrape found 0 members — xem debugHtmlPath để tinh chỉnh selector',
+      };
     } catch (e: any) {
       return { success: false, members: [], error: e.message };
     }

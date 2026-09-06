@@ -4,11 +4,23 @@ import type { Channel } from '@/../configs/channelConfig';
 import { CHANNEL } from '@/lib/channelHelper';
 
 const MESSAGE_TOPIC_KEY_SEPARATOR = '__tg_topic__';
-const FORUM_TOPICS_STORAGE_PREFIX = 'deplao_forum_topics_';
+const FORUM_TOPICS_STORAGE_PREFIX = 'adnzalo_forum_topics_';
+// Key cũ thời kỳ fork từ Deplao — migrate thẳng sang key mới khi khởi động
+const LEGACY_FORUM_TOPICS_PREFIX = 'deplao_forum_topics_';
 
 /** Restore persisted forum topics from localStorage (survives app restart). */
 function loadPersistedForumTopics(): Record<string, any[]> {
   try {
+    // Migrate key cũ → key mới (một lần, sau đó xóa key cũ)
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(LEGACY_FORUM_TOPICS_PREFIX)) continue;
+      const cacheKey = key.slice(LEGACY_FORUM_TOPICS_PREFIX.length);
+      if (!localStorage.getItem(FORUM_TOPICS_STORAGE_PREFIX + cacheKey)) {
+        localStorage.setItem(FORUM_TOPICS_STORAGE_PREFIX + cacheKey, localStorage.getItem(key) || '');
+      }
+      localStorage.removeItem(key);
+    }
     const restored: Record<string, any[]> = {};
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);

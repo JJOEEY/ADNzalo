@@ -1704,7 +1704,7 @@ export function useZaloEvents() {
         delete newTopics[cacheKey];
         useChatStore.setState({ forumTopics: newTopics });
         // Also clear persisted cache
-        try { localStorage.removeItem(`deplao_forum_topics_${cacheKey}`); } catch {}
+        try { localStorage.removeItem(`adnzalo_forum_topics_${cacheKey}`); localStorage.removeItem(`deplao_forum_topics_${cacheKey}`); } catch {}
       }
     });
 

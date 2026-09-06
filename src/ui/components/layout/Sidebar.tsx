@@ -105,8 +105,8 @@ export default function Sidebar({ onAddAccount }: SidebarProps) {
     <div className={`flex flex-col bg-gray-900 border-r border-gray-700 h-full transition-all duration-200 ${isExpanded ? 'w-64' : 'w-16'}`}>
       {/* ─── Header ADNzalo thân thiện ─── */}
       <div className="h-14 flex items-center gap-2 px-3 border-b border-gray-700/50 flex-shrink-0">
-        {/* ADN primary gradient: adn.DEFAULT (#0b3b8f) → adn.cyan (#16b8c4) — kept as blue-600 → cyan-500 for Tailwind compat */}
-        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center text-white font-black text-sm flex-shrink-0">A</div>
+        {/* Logo ADNzalo: brand gradient ADN light → ADN cyan */}
+        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-adn-light to-adn-cyan flex items-center justify-center text-white font-black text-sm flex-shrink-0 shadow-glow-cyan">A</div>
         {isExpanded && (
           <div className="flex-1 min-w-0">
             <p className="text-sm font-bold text-white leading-none truncate">ADNzalo</p>

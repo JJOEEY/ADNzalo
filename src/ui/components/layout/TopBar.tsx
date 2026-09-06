@@ -8,8 +8,6 @@ import { useAccountStore } from '@/store/accountStore';
 import { useUpdateStore } from '@/store/updateStore';
 import { useEmployeeStore } from '@/store/employeeStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
-import { useCRMStore } from '@/store/crmStore';
-import { hasUnseenAffiliate, markAffiliateSeen } from '@/utils/settingsSeenTabs';
 import { useChatStore } from '@/store/chatStore';
 import WorkspaceSwitcher from '@/components/common/WorkspaceSwitcher';
 import { useErpNotificationStore } from '@/store/erp/erpNotificationStore';
@@ -39,14 +37,6 @@ export default function TopBar() {
   // Font size slider: local temp value, only applies on release
   const [fontTemp, setFontTemp] = useState(fontSizeScale);
 
-  // ── Affiliate red dot ────────────────────────────────────────────────
-  const [hasNewAffiliate, setHasNewAffiliate] = useState(() => hasUnseenAffiliate());
-  useEffect(() => {
-    const handler = () => setHasNewAffiliate(hasUnseenAffiliate());
-    window.addEventListener('settings:tabSeen', handler);
-    return () => window.removeEventListener('settings:tabSeen', handler);
-  }, []);
-
   // Update state
   const { status: updateStatus, updateInfo, platform, setShowPopup, openUpdatePopup } = useUpdateStore();
   const isMac = platform === 'darwin';
@@ -64,10 +54,18 @@ export default function TopBar() {
   const usernameRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
 
-  // Load saved password từ localStorage
+  // Load saved password từ localStorage (migrate key cũ thời Deplao nếu có)
   useEffect(() => {
     try {
-      const raw = localStorage.getItem('deplao_employee_password');
+      let raw = localStorage.getItem('adnzalo_employee_password');
+      if (!raw) {
+        const legacy = localStorage.getItem('deplao_employee_password');
+        if (legacy) {
+          raw = legacy;
+          localStorage.setItem('adnzalo_employee_password', legacy);
+          localStorage.removeItem('deplao_employee_password');
+        }
+      }
       if (raw) setSavedPassword(atob(raw));
     } catch { /* ignore */ }
   }, []);
@@ -75,7 +73,7 @@ export default function TopBar() {
   // Save password khi kết nối thành công
   const savePassword = useCallback((password: string) => {
     try {
-      localStorage.setItem('deplao_employee_password', btoa(password));
+      localStorage.setItem('adnzalo_employee_password', btoa(password));
       setSavedPassword(password);
     } catch { /* ignore */ }
   }, []);
@@ -677,9 +675,6 @@ export default function TopBar() {
             className="w-9 h-9 flex items-center justify-center text-gray-400 hover:bg-gray-700 hover:text-white transition-colors relative"
             title="Thêm (cỡ chữ, hướng dẫn, báo lỗi)"
           >
-            {hasNewAffiliate && (
-              <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse z-10" />
-            )}
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="1.5"/>
               <circle cx="5" cy="12" r="1.5"/>
@@ -755,34 +750,6 @@ export default function TopBar() {
                 <div>
                   <p className="text-xs font-medium">Báo lỗi</p>
                   <p className="text-[10px] text-gray-400">Gửi phản hồi & báo cáo lỗi</p>
-                </div>
-              </button>
-
-              {/* Kiếm tiền */}
-              <button
-                onClick={() => {
-                  setMoreOpen(false);
-                  markAffiliateSeen();
-                  setHasNewAffiliate(false);
-                  // Navigate to CRM → Nhóm → Quét thành viên
-                  window.dispatchEvent(new CustomEvent('nav:view', { detail: { view: 'crm' } }));
-                  useCRMStore.getState().setTab('groups');
-                  try { localStorage.setItem('crm_open_scan_tab', 'true'); } catch {}
-                  setTimeout(() => window.dispatchEvent(new CustomEvent('crm:openScanTab')), 150);
-                }}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-amber-400 transition-colors text-left border-t border-gray-700/50 relative"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
-                  <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-                </svg>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs font-medium">Kiếm tiền</p>
-                    {hasNewAffiliate && (
-                      <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse flex-shrink-0" />
-                    )}
-                  </div>
-                  <p className="text-[10px] text-gray-400">Giới thiệu ADNzalo Premium - Nhận hoa hồng trọn đời</p>
                 </div>
               </button>
 

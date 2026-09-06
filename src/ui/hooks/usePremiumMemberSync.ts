@@ -5,21 +5,10 @@ import { useAccountStore } from '@/store/accountStore';
 import { syncZaloGroups, SyncGroupsProgress } from '@/lib/zaloGroupUtils';
 
 /**
- * Check if account has premium from localStorage (no backend call).
- * ADNzalo: luôn trả về true để mở khóa quét thành viên ẩn miễn phí (không cần mua Premium như Deplao).
+ * ADNzalo: quét thành viên ẩn luôn miễn phí — không còn gói Premium.
  */
-export function isPremiumFromStorage(accountId: string): boolean {
-  // ADNzalo: bỏ chặn Premium - quét ẩn luôn được phép
+export function isPremiumFromStorage(_accountId: string): boolean {
   return true;
-  // Logic gốc Deplao giữ lại comment để tham khảo:
-  // try {
-  //   const raw = localStorage.getItem(`premium_${accountId}`);
-  //   if (raw) {
-  //     const data = JSON.parse(raw);
-  //     return new Date(data.expiresAt) > new Date();
-  //   }
-  // } catch {}
-  // return false;
 }
 
 interface UsePremiumMemberSyncOptions {
@@ -39,9 +28,8 @@ interface UsePremiumMemberSyncResult {
 }
 
 /**
- * Hook for syncing group members with premium fallback.
- * - Premium: uses scanGroupViaBackend for better sync
- * - Non-premium: uses normal syncZaloGroups
+ * Hook for syncing group members.
+ * Uses the scan backend for richer results, falling back to local zca-js sync.
  */
 export function usePremiumMemberSync({
   accountId,

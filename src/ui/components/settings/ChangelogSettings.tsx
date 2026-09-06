@@ -85,7 +85,6 @@ const CHANGELOG: VersionEntry[] = [
     highlights: [
       '🎬 Video Player inline — Xem video ngay trong app, hỗ trợ seek/scrub, auto-fix MP4 faststart',
       '🤖 Telegram Bot Commands — Menu lệnh bot, Mini App WebView, inline buttons trên tin nhắn',
-      '💰 CRM nâng cấp — Quét nhóm premium hỗ trợ Affiliate',
     ],
     changes: [
       {
@@ -190,9 +189,6 @@ const CHANGELOG: VersionEntry[] = [
       {
         category: 'improved',
         items: [
-          'backendService.ts — Thêm API payment + shared groups, map response snake_case → camelCase, header x-api-key',
-          'GroupMembersTab — Premium section với nút "Mua ngay" / "Gia hạn thêm" mở popup',
-          'ShareGroupModal — Auto-validate link khi mở, scrollable trên màn hình nhỏ',
           'Chat — Dùng IntersectionObserver thay scroll event để tải tin nhắn cũ, ổn định hơn',
           'Chat — Fallback retry cho hội thoại <20 tin không load được trang cũ',
           'Phát hiện @mention chính xác hơn — dùng regex thay vì includes(), phân biệt @all/@allStar, dùng username cho Telegram',

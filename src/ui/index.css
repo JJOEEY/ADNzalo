@@ -2,13 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── CSS Variables - dark theme defaults (ADN palette) ─────────────────────── */
+/* ── CSS Variables - dark theme defaults (ADN "Tối Executive") ────────────── */
 :root {
-  --color-sidebar: #0b1842;
-  --color-sidebar-hover: #10265a;
+  --color-sidebar: #0a0f26;
+  --color-sidebar-hover: #111a3d;
   --color-adn-primary: #0b3b8f;
   --color-adn-accent: #1261d6;
   --color-adn-cyan: #16b8c4;
+  color-scheme: dark;
 }
 
 @layer base {
@@ -19,8 +20,8 @@
     margin: 0;
     padding: 0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background-color: #0b1842;
-    color: #e2e8f0;
+    background-color: #0b1129;
+    color: #e2e8f2;
     overflow: hidden;
     -webkit-user-select: text;
     user-select: text;
@@ -33,11 +34,11 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: #4a5568;
+    background: #36405e;
     border-radius: 0.1875rem;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #718096;
+    background: #4b5673;
   }
 }
 

@@ -512,7 +512,6 @@ export class FacebookService {
     // IMPORTANT: Only media types that require download (image, video, audio, file)
     // legitimately need directPath. Link/sticker type attachments do NOT have directPath
     // by design - they must NOT be caught by the "no directPath" check.
-    // See BUG https://github.com/deplao/builder/issues/...
     const MEDIA_DOWNLOAD_TYPES = new Set(['image', 'video', 'audio', 'file']);
     const isSelfEchoMedia = isSelf && msg.isE2EE && (
       // Case 1: has media-type attachment requiring download but no directPath → incomplete echo

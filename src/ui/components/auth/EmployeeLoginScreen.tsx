@@ -83,10 +83,18 @@ export default function EmployeeLoginScreen({ onBossMode, onEmployeeConnected }:
         }
     };
 
-    // Load saved values from localStorage
+    // Load saved values from localStorage (migrate key cũ thời Deplao nếu có)
     useEffect(() => {
         try {
-            const saved = localStorage.getItem('deplao_employee_login');
+            let saved = localStorage.getItem('adnzalo_employee_login');
+            if (!saved) {
+                const legacy = localStorage.getItem('deplao_employee_login');
+                if (legacy) {
+                    saved = legacy;
+                    localStorage.setItem('adnzalo_employee_login', legacy);
+                    localStorage.removeItem('deplao_employee_login');
+                }
+            }
             if (saved) {
                 const data = JSON.parse(saved);
                 if (data.bossAddress) setBossAddress(data.bossAddress);
@@ -152,7 +160,7 @@ export default function EmployeeLoginScreen({ onBossMode, onEmployeeConnected }:
             }
 
             // Lưu login cho lần sau
-            localStorage.setItem('deplao_employee_login', JSON.stringify({
+            localStorage.setItem('adnzalo_employee_login', JSON.stringify({
                 bossAddress: bossAddress.trim(),
                 username: username.trim(),
             }));

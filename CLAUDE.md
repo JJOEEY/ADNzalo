@@ -70,6 +70,10 @@ PORT=3100
 ```bash
 SECRET_KEY=... PORT=3100 node server.js
 ```
+> Kho thành viên tích lũy ghi vào `data/member-cache.json` trong thư mục backend
+> (đổi qua `CACHE_DIR`). Service systemd có `ProtectHome=read-only` nên
+> `deploy-vps.sh` tự tạo `data/` và unit khai báo `ReadWritePaths` cho thư mục này —
+> không bỏ bước tạo `data/` nếu deploy tay.
 Production dùng `adnzalo-scan-backend.service` với user system riêng; không chạy chung trong container `adn-web`.
 Có thể dùng `bash server/adn-scan-backend/deploy-vps.sh` trên VPS sau khi upload thư mục backend; script tự backup nginx, chạy `nginx -t` và chỉ reload khi hợp lệ.
 
@@ -122,20 +126,22 @@ curl -X POST https://adncapital.com.vn/api/scan/group \
 
 ---
 
-## 🔄 Dual-backend fallback (hiện tại)
+## 🔄 Backend quét + kho tích lũy (hiện tại)
 
-`src/ui/lib/backendService.ts` sử dụng 2 domain:
-- **PRIMARY**: `https://adncapital.com.vn` (backend ADN — mục tiêu chính)
-- **FALLBACK**: `https://deplaoapp.com` (server Deplao — dùng tạm khi ADN chưa deploy)
+`src/ui/lib/backendService.ts` chỉ gọi **một** backend: `https://adncapital.com.vn`.
 
-Khi ADN backend đã deploy hoạt động, fallback tự động ngưng được sử dụng.
-Không xóa fallback trước khi `https://adncapital.com.vn/api/health` trả HTTP 200 và test scan bằng tài khoản thật thành công.
+Backend quét (`server/adn-scan-backend/server.js`) tự tích lũy **kho thành viên ADN**:
+- Mỗi lần quét live thành công → upsert thành viên vào `data/member-cache.json` theo `groupId` (atomic write, debounce 3s, đổi đường dẫn qua `CACHE_DIR`).
+- Khi live bị `lockViewMember` giới hạn (trả ít hơn tổng báo cáo) hoặc fail hẳn → hợp nhất/trả kho cache để vẫn có dữ liệu.
+- Kho càng dùng càng đầy: mỗi user quét nhóm họ có quyền xem sẽ đóng góp dữ liệu cho cả đội.
+
+FE có thêm **xoay vòng đa tài khoản** (`scanGroupViaBackendWithRotation` trong `GroupMembersTab.tsx`): khi nick chính bị giới hạn (≤10 người), thử tối đa 4 nick đã đăng nhập — nick nào là admin/phó nhóm sẽ lấy được danh sách đầy đủ.
 
 ---
 
 ## 🛡️ Bảo mật
 
-1. **SECRET_KEY** — không commit, không chia sẻ. File `.env` và `backendService.ts` phải trùng.
+1. **SECRET_KEY** — không commit khóa thật vào file env dạng public; `backendService.ts` giữ khóa hiện hành (bắt buộc: client-shipped). Đã rotate 2026-09: VPS đặt `SECRET_KEY=<mới>` + `SECRET_KEY_LEGACY=<cũ>` để app ≤1.0.0 vẫn chạy; xóa legacy khi mọi máy đã lên bản mới. Deploy: cập nhật `.env` VPS **trước**, app build mới **sau**.
 2. **x-api-key** — mọi request backend phải có header này, giá trị = `SECRET_KEY`.
 3. **Rate limit** — 60 req/phút/IP.
 4. **Cookie/IMEI** — chỉ truyền qua AES-128-CBC mã hóa, không lưu trữ vĩnh viễn.
@@ -176,11 +182,8 @@ Không xóa fallback trước khi `https://adncapital.com.vn/api/health` trả H
 
 ## ❓ FAQ
 
-**Q: Tại sao 2 domain?**
-A: `adncapital.com.vn` là backend ADN (mục tiêu), `deplaoapp.com` là fallback tạm khi ADN chưa deploy.
-
 **Q: Quét ẩn có cần backend không?**
-A: Backend chỉ giúp chạy API ngoài Electron và paginate `getGroupLinkInfo`; domain không tự cấp quyền. Nếu group link tắt hoặc tài khoản không có quyền xem danh sách, backend cũng không thể lấy thành viên bị Zalo giới hạn.
+A: Backend giúp chạy API ngoài Electron, paginate `getGroupLinkInfo`, vét lịch sử chat và giữ kho thành viên tích lũy. Domain không tự cấp quyền: nếu nhóm bật `lockViewMember` và không nick nào của đội là admin/phó nhóm, chỉ lấy được phần thành viên hoạt động (chat/được tag) + dữ liệu có trong kho.
 
-**Q: Khác gì với dự án Deplao?**
-A: ADNzalo fork từ deplao-builder nhưng đã đổi hoàn toàn domain, palette, chức năng. Deplao chỉ là upstream để sync, không ảnh hưởng.
+**Q: Nhóm cộng đồng quét không đủ?**
+A: `lockViewMember` là giới hạn server của Zalo cho nhóm cộng đồng. Ba đường tăng độ phủ: (1) vét lịch sử chat sâu hơn, (2) xoay vòng đa nick để tìm nick có quyền, (3) kho tích lũy ADNunion qua các lần quét. Không có cách nào vượt lockViewMember 100% nếu không có admin account trong nhóm.

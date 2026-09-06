@@ -16,6 +16,9 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
+# Kho thành viên tích lũy (data/member-cache.json) phải ghi được dù ProtectHome=read-only.
+# Tiền tố '-' để service vẫn start nếu thư mục chưa tồn tại (deploy-vps.sh sẽ tạo sẵn).
+ReadWritePaths=-/home/adncapital/app/adnzalo-scan-backend/data
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 
 [Install]

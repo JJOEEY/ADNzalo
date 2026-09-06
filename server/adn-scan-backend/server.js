@@ -1,19 +1,39 @@
 import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import { Zalo } from 'zca-js';
 import 'dotenv/config';
+
+// package.json đặt "type": "module" → không có __dirname, tự suy ra từ import.meta.url
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 app.set('trust proxy', 1);
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: '1mb' }));
 
+// Security headers — API JSON thuần, không phục vụ trình duyệt trực tiếp
+app.use((req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('X-Frame-Options', 'DENY');
+  res.set('Referrer-Policy', 'no-referrer');
+  res.set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+  next();
+});
+
 const SECRET_KEY = process.env.SECRET_KEY || '';
+// Khóa cũ thời kỳ trước rotate — chỉ để chấp nhận request từ app 1.0.0 chưa
+// nâng cấp. Xóa biến này khỏi .env sau khi toàn bộ client đã lên bản mới.
+const SECRET_KEY_LEGACY = process.env.SECRET_KEY_LEGACY || '';
 const PORT = Number(process.env.PORT || 3100);
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36';
-const FALLBACK_BACKEND_URL = 'https://deplaoapp.com';
 
+const VALID_KEYS = [SECRET_KEY, SECRET_KEY_LEGACY].filter(
+  (k) => /^[0-9a-fA-F]{32,}$/.test(k),
+);
 if (!/^[0-9a-fA-F]{32,}$/.test(SECRET_KEY)) {
   throw new Error('SECRET_KEY must be provided as a hexadecimal string');
 }
@@ -51,25 +71,30 @@ function decryptBody(encryptedB64) {
   if (typeof encryptedB64 !== 'string' || encryptedB64.length === 0 || encryptedB64.length > 900_000) {
     return null;
   }
-  try {
-    const key = Buffer.from(SECRET_KEY, 'hex').slice(0, 16);
-    const iv = Buffer.alloc(16, 0);
-    const decipher = crypto.createDecipheriv('aes-128-cbc', key, iv);
-    let dec = decipher.update(encryptedB64, 'base64', 'utf8');
-    dec += decipher.final('utf8');
-    return JSON.parse(dec);
-  } catch {
-    // Plain base64 is opt-in for local development only.
-    if (process.env.ALLOW_PLAIN_PAYLOAD !== '1') return null;
-    try { return JSON.parse(Buffer.from(encryptedB64, 'base64').toString('utf8')); } catch { return null; }
+  // Thử khóa mới trước rồi khóa legacy — client cũ mã hóa bằng khóa cũ
+  for (const key of VALID_KEYS) {
+    try {
+      const keyBuf = Buffer.from(key, 'hex').slice(0, 16);
+      const iv = Buffer.alloc(16, 0);
+      const decipher = crypto.createDecipheriv('aes-128-cbc', keyBuf, iv);
+      let dec = decipher.update(encryptedB64, 'base64', 'utf8');
+      dec += decipher.final('utf8');
+      return JSON.parse(dec);
+    } catch {}
   }
+  // Plain base64 is opt-in for local development only.
+  if (process.env.ALLOW_PLAIN_PAYLOAD !== '1') return null;
+  try { return JSON.parse(Buffer.from(encryptedB64, 'base64').toString('utf8')); } catch { return null; }
 }
 
 function requireApiKey(req, res, next) {
   const supplied = String(req.headers['x-api-key'] || '');
-  const expected = Buffer.from(SECRET_KEY);
   const actual = Buffer.from(supplied);
-  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) {
+  const ok = VALID_KEYS.some((key) => {
+    const expected = Buffer.from(key);
+    return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+  });
+  if (!ok) {
     return res.status(401).json({ success: false, error: 'Invalid API key' });
   }
   return next();
@@ -104,7 +129,17 @@ function extractIdsFromGroupInfo(gData) {
     (Array.isArray(gData.memVerList) ? gData.memVerList : null) ??
     (gData.memVerList && typeof gData.memVerList === 'object' ? Object.keys(gData.memVerList) : null) ??
     [];
-  return [...new Set(rawIds.map((id) => String(id).replace(/_0$/, '').trim()).filter((id) => /^\d+$/.test(id)))];
+  const ids = [...rawIds];
+  // Bổ sung: thành viên mới tham gia gần đây + danh sách admin (kèm profile)
+  for (const m of gData.updateMems || []) {
+    if (m?.id) ids.push(String(m.id));
+    if (m?.memberId) ids.push(String(m.memberId));
+  }
+  for (const a of gData.admins || []) {
+    if (a?.id) ids.push(String(a.id));
+    if (typeof a === 'string') ids.push(a);
+  }
+  return [...new Set(ids.map((id) => String(id).replace(/_0$/, '').trim()).filter((id) => /^\d+$/.test(id)))];
 }
 
 async function enrichMembers(api, memberIds) {
@@ -185,6 +220,95 @@ async function getCachedApi(pageId, cookie, imei, userAgent, forceRefresh = fals
   return api;
 }
 
+// ── Kho cache thành viên ADN ────────────────────────────────────────────────
+// Mỗi lần quét live thành công, kết quả được tích lũy theo groupId (atomic
+// write, debounce 3s). Khi live bị lockViewMember giới hạn, hợp nhất (union)
+// với kho để trả tối đa số thành viên đã biết — thay cho pool bên ngoài.
+const CACHE_DIR = process.env.CACHE_DIR || path.join(__dirname, 'data');
+const CACHE_FILE = path.join(CACHE_DIR, 'member-cache.json');
+let memberCache = {};
+let cacheSaveTimer = null;
+try {
+  if (fs.existsSync(CACHE_FILE)) {
+    memberCache = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+  }
+  console.warn(`[cache] loaded ${Object.keys(memberCache).length} groups from member cache`);
+} catch (e) {
+  console.warn(`[cache] load failed: ${e.message}`);
+  memberCache = {};
+}
+
+function scheduleCacheSave() {
+  if (cacheSaveTimer) return;
+  cacheSaveTimer = setTimeout(() => {
+    cacheSaveTimer = null;
+    try {
+      fs.mkdirSync(CACHE_DIR, { recursive: true });
+      const tmp = `${CACHE_FILE}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(memberCache));
+      fs.renameSync(tmp, CACHE_FILE);
+      console.warn(`[cache] saved ${Object.keys(memberCache).length} groups`);
+    } catch (e) {
+      console.warn(`[cache] save failed: ${e.message}`);
+    }
+  }, 3000);
+  cacheSaveTimer.unref?.();
+}
+
+function cacheUpsertMembers(groupId, members) {
+  if (!/^\d+$/.test(String(groupId)) || !Array.isArray(members) || members.length === 0) return;
+  const bucket = memberCache[String(groupId)] || (memberCache[String(groupId)] = {});
+  const now = Date.now();
+  let added = 0;
+  for (const m of members) {
+    const uid = String(m?.userId || m?.id || '').replace(/_0$/, '');
+    if (!/^\d+$/.test(uid)) continue;
+    const prev = bucket[uid];
+    if (!prev) added += 1;
+    bucket[uid] = {
+      displayName: m.displayName || m.name || prev?.displayName || '',
+      zaloName: m.zaloName || prev?.zaloName || '',
+      avatar: m.avatar || prev?.avatar || '',
+      lastSeenAt: now,
+    };
+  }
+  scheduleCacheSave();
+  console.warn(`[cache] upsert ${groupId}: +${added} new, total ${Object.keys(bucket).length}`);
+}
+
+function cacheGetMembers(groupId) {
+  const bucket = memberCache[String(groupId)];
+  if (!bucket) return [];
+  return Object.entries(bucket).map(([uid, p]) => ({
+    userId: uid,
+    id: uid,
+    displayName: p.displayName || '',
+    zaloName: p.zaloName || '',
+    avatar: p.avatar || '',
+    accountStatus: 0,
+    type: 0,
+    source: 'cache',
+  }));
+}
+
+/** Hợp nhất cache vào danh sách live khi live bị giới hạn (ít hơn tổng báo cáo) */
+function mergeWithCache(groupId, liveMembers, totalReported) {
+  const total = Number(totalReported || 0);
+  if (liveMembers.length >= total && total > 0) return { members: liveMembers, merged: 0 };
+  const seen = new Set(liveMembers.map((m) => m.userId));
+  const merged = [...liveMembers];
+  for (const c of cacheGetMembers(groupId)) {
+    if (!seen.has(c.userId)) {
+      seen.add(c.userId);
+      merged.push(c);
+    }
+  }
+  if (merged.length > liveMembers.length) {
+    console.warn(`[scan] cache merge ${groupId}: live=${liveMembers.length} +cache=${merged.length - liveMembers.length} (reported ${total})`);
+  }
+  return { members: merged, merged: merged.length - liveMembers.length };
+}
+
 async function scanGroupMembers({ groupId, cookie, imei, userAgent, pageId }) {
   const api = await getCachedApi(pageId || groupId, cookie, imei, userAgent);
 
@@ -261,18 +385,9 @@ async function scanGroupMembers({ groupId, cookie, imei, userAgent, pageId }) {
     console.warn(`[scan] invite-box scan failed for ${groupId}: ${e.message}`);
   }
 
-  // 1d) Nếu vẫn không có link: thử bật link (như Deplao/tool khác) — được phép mọi cách
-  try {
-    const enabled = await api.enableGroupLink(groupId);
-    const newLink = enabled?.link;
-    if (newLink) {
-      console.warn(`[scan] enabled invite link for ${groupId}, rescanning via link`);
-      const members = await scanViaLink(newLink);
-      if (members.length > 0) return members;
-    }
-  } catch (e) {
-    console.warn(`[scan] enableGroupLink failed for ${groupId}: ${e.message}`);
-  }
+  // 1d) KHÔNG tự bật invite link (enableGroupLink) — không thay đổi cài đặt nhóm
+  // của người khác; nếu nhóm tắt link và tài khoản không phải admin thì chuyển
+  // sang fallback getGroupInfo + vét lịch sử chat + kho cache bên dưới.
 
   // 2) Fallback cho nhóm ẩn + không link: getGroupInfo memVerList/memberIds (backend, không phụ thuộc link)
   // Thử getGroupInfo với cả groupId và globalId nếu có
@@ -316,8 +431,9 @@ async function scanGroupMembers({ groupId, cookie, imei, userAgent, pageId }) {
       const seen = new Set(memberIds);
       const collected = [];
       try {
-        // zca-js getGroupChatHistory chỉ nhận (groupId, count), thử cả groupId và globalId
-        const hist = await api.getGroupChatHistory(gid, 500);
+        // zca-js getGroupChatHistory chỉ nhận (groupId, count) — hỏi 1000 tin,
+        // server Zalo có thể trả ít hơn nhưng mình vẫn gom hết những gì nhận được
+        const hist = await api.getGroupChatHistory(gid, 1000);
         const msgs = hist?.groupMsgs || hist?.data?.groupMsgs || [];
         for (const msg of msgs) {
           const uid = String(msg.senderId || msg.authorId || msg.uid || msg.fromId || msg.userId || '').replace(/_0$/, '');
@@ -345,7 +461,7 @@ async function scanGroupMembers({ groupId, cookie, imei, userAgent, pageId }) {
       const enrichedHist = await enrichMembers(api, historyMembers);
       if (enrichedHist.length > memberIds.length) {
         console.warn(`[scan] using chat-history enriched ${enrichedHist.length} for ${groupId}`);
-        return enrichedHist;
+        return mergeWithCache(groupId, enrichedHist, totalReported).members;
       }
     }
     // Nếu vét lịch sử vẫn ít (nhóm ít chat), vẫn trả 4 nhưng log đã rõ — không thể vượt lockViewMember nếu là thành viên thường
@@ -354,11 +470,13 @@ async function scanGroupMembers({ groupId, cookie, imei, userAgent, pageId }) {
 
   const enriched = await enrichMembers(api, memberIds);
   // Gắn role
-  return enriched.map((m) => ({
+  const finalMembers = enriched.map((m) => ({
     ...m,
     type: m.type,
     // role suy ra để FE hiển thị, nhưng backend trả theo type
   }));
+  // Live bị giới hạn so với tổng báo cáo → hợp nhất với kho cache ADN
+  return mergeWithCache(groupId, finalMembers, Number(gData.totalMember || 0)).members;
 }
 
 // ── POST /api/scan/group ───────────────────────────────────────────────────
@@ -400,47 +518,30 @@ app.post('/api/scan/group', rateLimit, requireApiKey, async (req, res) => {
         if (msg.includes('Đăng nhập') || e2.message.includes('Đăng nhập')) {
           return res.json({ success: false, groupId, totalMembers: 0, members: [], error: 'Phiên Zalo hết hạn, vui lòng đăng nhập lại nick này trong ADNzalo' });
         }
+        // Live fail hoàn toàn → trả kho cache ADN nếu có dữ liệu
+        const cached = cacheGetMembers(groupId);
+        if (cached.length > 0) {
+          console.warn(`[scan] live failed, returning cache-only ${cached.length} for ${groupId}`);
+          return res.json({ success: true, groupId, totalMembers: cached.length, members: cached, source: 'cache' });
+        }
         throw e2;
       }
     } else {
-      throw e;
-    }
-  }
-  try {
-    // Y như Deplao: nếu live chỉ ra <=10 nhưng Zalo báo đông, thử lấy cache từ deplaoapp.com (pool admin)
-    if (members.length <= 10) {
-      try {
-        const fbRes = await fetch(`${FALLBACK_BACKEND_URL}/api/scan/group`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': SECRET_KEY },
-          body: JSON.stringify({ page_id, body }),
-        });
-        const fbData = await fbRes.json();
-        console.warn(`[scan] fallback deplaoapp for ${groupId}: success=${fbData?.success} members=${fbData?.members?.length || 0} live=${members.length} fbError=${fbData?.error || ''}`);
-        if (fbData?.success && Array.isArray(fbData.members) && fbData.members.length > members.length) {
-          console.warn(`[scan] fallback deplaoapp got ${fbData.members.length} for ${groupId} (live ${members.length})`);
-          return res.json({ success: true, groupId, totalMembers: fbData.members.length, members: fbData.members });
-        }
-      } catch (e) {
-        console.warn(`[scan] fallback deplaoapp failed for ${groupId}: ${e.message}`);
+      // Live fail hoàn toàn → trả kho cache ADN nếu có dữ liệu
+      const cached = cacheGetMembers(groupId);
+      if (cached.length > 0) {
+        console.warn(`[scan] live failed (${msg}), returning cache-only ${cached.length} for ${groupId}`);
+        return res.json({ success: true, groupId, totalMembers: cached.length, members: cached, source: 'cache' });
       }
+      console.error('[scan/group] error:', e.message);
+      return res.json({ success: false, groupId, totalMembers: 0, members: [], error: 'Zalo scan failed' });
     }
-    return res.json({ success: true, groupId, totalMembers: members.length, members });
-  } catch (e) {
-    console.error('[scan/group] error:', e.message);
-    // Thử fallback deplao khi live throw
-    try {
-      const fbRes = await fetch(`${FALLBACK_BACKEND_URL}/api/scan/group`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': SECRET_KEY },
-        body: JSON.stringify({ page_id, body }),
-      });
-      const fbData = await fbRes.json();
-      console.warn(`[scan] fallback deplaoapp throw fallback for ${groupId}: success=${fbData?.success} members=${fbData?.members?.length || 0}`);
-      if (fbData?.success) return res.json(fbData);
-    } catch {}
-    return res.json({ success: false, groupId, totalMembers: 0, members: [], error: 'Zalo scan failed' });
   }
+  // Tích lũy kết quả live vào kho cache ADN cho các lần quét sau
+  try {
+    cacheUpsertMembers(groupId, members.filter((m) => m.source !== 'cache'));
+  } catch {}
+  return res.json({ success: true, groupId, totalMembers: members.length, members });
 });
 
 app.post('/api/scan/premium-status', rateLimit, requireApiKey, (req, res) => {

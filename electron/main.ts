@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, protocol, net, Notification, safeStorage } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, protocol, net, Notification, safeStorage, session } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { autoUpdater } from 'electron-updater';
@@ -234,6 +234,29 @@ function createWindow() {
   if (isDev) {
     mainWindow.loadURL('http://localhost:27799');
   } else {
+    // ── CSP production: chỉ áp cho file:// của app (scraper dùng session
+    // riêng, dev server không qua đây nên không bị ảnh hưởng)
+    const csp = [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' local-media: https: data: blob:",
+      "media-src 'self' local-media: https: data: blob:",
+      "connect-src 'self' local-media: https: http: ws: wss:",
+      "font-src 'self' data:",
+      "frame-src https:",
+      "worker-src 'self' blob:",
+      "object-src 'none'",
+      "base-uri 'self'",
+    ].join('; ');
+    session.defaultSession.webRequest.onHeadersReceived(
+      { urls: ['file://*/*'] },
+      (details, callback) => {
+        callback({
+          responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [csp] },
+        });
+      },
+    );
     mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
   }
 

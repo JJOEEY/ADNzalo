@@ -32,8 +32,6 @@ Vận hành tập trung cho ADN Capital: quét thành viên ẩn, gửi theo SĐ
   <a href="#-liên-hệ">📞 Liên hệ</a>
 </p>
 
-> **Nguồn gốc:** Clone từ `babyvibe/deplao-builder v26.8.5` (MIT), đổi tên thành **ADNzalo v1.0.0** cho ADN Capital. Giữ **Zalo + CRM + Campaign + AI + Workflow**, bỏ POS/ERP mặc định, thêm custom ADN (gpt-5.6-luna, proxy riêng, quét thành viên miễn phí).
-
 ---
 
 ## ⬇️ Tải xuống
@@ -193,7 +191,7 @@ npm run production
 
 ### Dữ liệu cục bộ
 
-- Dữ liệu app dùng SQLite cục bộ: `%APPDATA%\ADNzalo\adnzalo-tool.db` (đã đổi từ `deplao-tool.db`)
+- Dữ liệu app dùng SQLite cục bộ: `%APPDATA%\ADNzalo\adnzalo-tool.db`
 - Media: `%APPDATA%\ADNzalo\media\`
 - Có thể đổi thư mục lưu trữ trong `Cài đặt → Lưu trữ`
 - Lần đầu xóa `C:\Users\<Bạn>\AppData\Roaming\ADNzalo\` cũ rồi mở lại để tạo DB mới nếu migrate từ bản cũ
@@ -512,7 +510,6 @@ ADNzalo ưu tiên kiến trúc chạy cục bộ:
 
 - Kết nối Internet 24/7 ổn định để đồng bộ hội thoại và automation
 - Nên để app hoạt động liên tục nếu dùng workflow hoặc vận hành đội nhóm
-- Tắt bản Deplao cũ khi chạy ADNzalo để không tranh DB
 
 ---
 
@@ -520,11 +517,10 @@ ADNzalo ưu tiên kiến trúc chạy cục bộ:
 
 - Website: [https://adncapital.com.vn](https://adncapital.com.vn) · Fanpage: [https://fb.com/adnzalo](https://fb.com/adnzalo)
 - Báo lỗi, góp ý: 👉 [Tạo issue tại đây](https://github.com/JJOEEY/ADNzalo/issues)
-- Affiliate: [https://adncapital.com.vn/affiliate](https://adncapital.com.vn/affiliate)
 
 ## 🙏 Lời cảm ơn
 
-ADNzalo xin gửi lời cảm ơn đến dự án gốc `babyvibe/deplao-builder` và các thư viện: zca-js & fbchat-v2, cùng cộng đồng mã nguồn mở.
+ADNzalo xin gửi lời cảm ơn các thư viện mã nguồn mở: zca-js & fbchat-v2 cùng cộng đồng open source.
 
 ---
 

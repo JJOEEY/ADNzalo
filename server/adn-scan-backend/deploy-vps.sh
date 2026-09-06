@@ -16,6 +16,9 @@ install -o root -g root -m 0644 "$APP_DIR/$SERVICE_NAME" "/etc/systemd/system/$S
 install -d -m 0755 /etc/nginx/snippets
 install -o root -g root -m 0644 "$APP_DIR/adnzalo-scan.nginx" "$NGINX_SNIPPET"
 
+# Kho thành viên tích lũy: systemd ReadWritePaths cần thư mục tồn tại + đúng owner
+install -d -o adnzalo-scan -g adnzalo-scan -m 0755 "$APP_DIR/data"
+
 chown -R adnzalo-scan:adnzalo-scan "$APP_DIR"
 chmod 600 "$APP_DIR/.env"
 systemctl daemon-reload

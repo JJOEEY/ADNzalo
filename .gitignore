@@ -19,3 +19,6 @@ tmp/
 ADNzalo-Setup*.zip
 *.zip
 
+
+# Kho thành viên tích lũy của scan backend (không commit dữ liệu cache)
+server/adn-scan-backend/data/
