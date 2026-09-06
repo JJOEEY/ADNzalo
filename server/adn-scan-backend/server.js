@@ -203,10 +203,16 @@ async function enrichMembers(api, memberIds) {
 }
 
 const apiCache = new Map();
+// Lỗi phiên/session Zalo — server phải login lại thay vì reuse cache
+function isSessionError(e) {
+  const msg = String(e?.message || e || '');
+  return msg.includes('zpw_sek') || msg.includes('Đăng nhập') || msg.includes('đăng nhập');
+}
 async function getCachedApi(pageId, cookie, imei, userAgent, forceRefresh = false) {
   const key = `${pageId}:${imei}`;
-  // Nếu cookie đổi (sau khi đăng nhập lại) thì xóa cache cũ
-  const cookieHash = String(cookie).slice(0, 64);
+  // Nếu cookie đổi (sau khi đăng nhập lại) thì xóa cache cũ.
+  // Hash TOÀN BỘ cookie: cookie là JSON jar nên slice(0,64) luôn trùng prefix hằng.
+  const cookieHash = crypto.createHash('sha256').update(String(cookie)).digest('hex');
   const cached = apiCache.get(key);
   if (!forceRefresh && cached && Date.now() - cached.ts < 5 * 60 * 1000 && cached.cookieHash === cookieHash) {
     console.warn(`[scan] reuse cached api for ${pageId}`);
@@ -311,6 +317,11 @@ function mergeWithCache(groupId, liveMembers, totalReported) {
 
 async function scanGroupMembers({ groupId, cookie, imei, userAgent, pageId }) {
   const api = await getCachedApi(pageId || groupId, cookie, imei, userAgent);
+  // Gom lỗi phiên Zalo từ các bước: mỗi bước catch riêng nên lỗi gốc
+  // (zpw_sek/đăng nhập) phải được lan truyền ra ngoài để handler login lại,
+  // thay vì bị nuốt thành 'Cannot fetch group info' generic.
+  let sessionError = null;
+  const markSession = (e) => { if (!sessionError && isSessionError(e)) sessionError = e; };
 
   // 1) Thử qua invite link nếu có (paginate currentMems)
   const scanViaLink = async (link) => {
@@ -346,6 +357,7 @@ async function scanGroupMembers({ groupId, cookie, imei, userAgent, pageId }) {
       console.warn(`[scan] no invite link for ${groupId}, will try direct groupId + enable`);
     }
   } catch (e) {
+    markSession(e);
     console.warn(`[scan] link scan failed for ${groupId}: ${e.message}`);
   }
 
@@ -358,6 +370,7 @@ async function scanGroupMembers({ groupId, cookie, imei, userAgent, pageId }) {
     }
     if (members.length > 0) console.warn(`[scan] direct groupId scan only ${members.length} for ${groupId}`);
   } catch (e) {
+    markSession(e);
     console.warn(`[scan] direct groupId scan failed for ${groupId}: ${e.message}`);
   }
 
@@ -382,6 +395,7 @@ async function scanGroupMembers({ groupId, cookie, imei, userAgent, pageId }) {
     }
     if (members.length > 0) console.warn(`[scan] invite-box scan only ${members.length} for ${groupId}`);
   } catch (e) {
+    markSession(e);
     console.warn(`[scan] invite-box scan failed for ${groupId}: ${e.message}`);
   }
 
@@ -403,16 +417,20 @@ async function scanGroupMembers({ groupId, cookie, imei, userAgent, pageId }) {
         console.warn(`[scan] getGroupInfo ${label} for ${gid}: totalMember=${data.totalMember} memVerList=${mlen} memberIds=${(data.memberIds||[]).length} lockViewMember=${data.setting?.lockViewMember}`);
         return data;
       }
-    } catch (e) { console.warn(`[scan] getGroupInfo ${label} failed for ${gid}: ${e.message}`); }
+    } catch (e) { markSession(e); console.warn(`[scan] getGroupInfo ${label} failed for ${gid}: ${e.message}`); }
     return null;
   };
   gData = await tryGetGroupInfo(groupId, 'groupId');
-  if (!gData || (extractIdsFromGroupInfo(gData).length <= 4 && gData.globalId && gData.globalId !== groupId)) {
-    const g2 = await tryGetGroupInfo(gData?.globalId || '', 'globalId');
+  // Chỉ thử globalId khi có giá trị thật (tránh call rỗng gây log nhiễu)
+  const globalIdForInfo = String(gData?.globalId || '');
+  if ((!gData || extractIdsFromGroupInfo(gData).length <= 4) && globalIdForInfo && globalIdForInfo !== groupId) {
+    const g2 = await tryGetGroupInfo(globalIdForInfo, 'globalId');
     if (g2 && extractIdsFromGroupInfo(g2).length > extractIdsFromGroupInfo(gData || {}).length) gData = g2;
   }
   infoRes = gData ? { gridInfoMap: { [groupId]: gData } } : null;
-  if (!gData) throw new Error('Cannot fetch group info');
+  // Ưu tiên lan truyền lỗi phiên để handler xóa cache + login lại,
+  // thay vì lỗi generic khiến retry không bao giờ chạy.
+  if (!gData) throw sessionError || new Error('Cannot fetch group info');
 
   console.warn(`[scan] getGroupInfo raw for ${groupId}: keys=${Object.keys(gData).join(',')} totalMember=${gData.totalMember} hasMoreMember=${gData.hasMoreMember} type=${gData.type} subType=${gData.subType} lockViewMember=${gData.setting?.lockViewMember} creatorId=${gData.creatorId} adminIds=${(gData.adminIds||[]).length} memberIds=${(gData.memberIds||[]).length} currentMems=${(gData.currentMems||[]).length} updateMems=${(gData.updateMems||[]).length} admins=${(gData.admins||[]).length} memVerList=${Array.isArray(gData.memVerList)?gData.memVerList.length:Object.keys(gData.memVerList||{}).length} globalId=${gData.globalId}`);
 
@@ -447,6 +465,7 @@ async function scanGroupMembers({ groupId, cookie, imei, userAgent, pageId }) {
         console.warn(`[scan] chat-history ${label} collected ${collected.length} extra uids for ${groupId} (total ${seen.size}/${totalReported})`);
         if (collected.length > 0) return [...memberIds, ...collected];
       } catch (e) {
+        markSession(e);
         console.warn(`[scan] chat-history ${label} failed for ${groupId}: ${e.message}`);
       }
       return null;
@@ -508,14 +527,16 @@ app.post('/api/scan/group', rateLimit, requireApiKey, async (req, res) => {
     });
   } catch (e) {
     const msg = String(e.message || '');
-    if (msg.includes('zpw_sek') || msg.includes('Đăng nhập')) {
+    if (isSessionError(e)) {
       console.warn(`[scan] clearing cache and retry once for ${page_id} due to ${msg}`);
       apiCache.delete(`${page_id}:${imei}`);
       try {
         members = await scanGroupMembers({ groupId, cookie, imei, userAgent: payload.userAgent, pageId: page_id });
       } catch (e2) {
         console.error('[scan/group] retry failed:', e2.message);
-        if (msg.includes('Đăng nhập') || e2.message.includes('Đăng nhập')) {
+        // Retry vẫn lỗi phiên (kể cả zpw_sek) → cookie đã chết thật,
+        // báo rõ để user đăng nhập lại nick trong ADNzalo thay vì lỗi chung chung.
+        if (isSessionError(msg) || isSessionError(e2)) {
           return res.json({ success: false, groupId, totalMembers: 0, members: [], error: 'Phiên Zalo hết hạn, vui lòng đăng nhập lại nick này trong ADNzalo' });
         }
         // Live fail hoàn toàn → trả kho cache ADN nếu có dữ liệu
