@@ -103,7 +103,7 @@ jobs:
 
       - name: 🚀 Publish Windows → GitHub Releases
         if: needs.resolve-tag.outputs.should_publish == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           repository: JJOEEY/ADNzalo
           tag_name: ${{ needs.resolve-tag.outputs.tag }}
@@ -156,7 +156,7 @@ jobs:
 
       - name: 🚀 Publish macOS → GitHub Releases
         if: needs.resolve-tag.outputs.should_publish == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           repository: JJOEEY/ADNzalo
           tag_name: ${{ needs.resolve-tag.outputs.tag }}
@@ -226,7 +226,7 @@ jobs:
 
       - name: 🚀 Publish Linux → GitHub Releases
         if: needs.resolve-tag.outputs.should_publish == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           repository: JJOEEY/ADNzalo
           tag_name: ${{ needs.resolve-tag.outputs.tag }}
