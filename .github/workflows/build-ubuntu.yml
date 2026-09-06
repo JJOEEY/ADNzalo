@@ -104,7 +104,7 @@ jobs:
 
       - name: 🚀 Publish lên GitHub Releases
         if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           repository: JJOEEY/ADNzalo
           tag_name: ${{ steps.get_tag.outputs.tag }}
