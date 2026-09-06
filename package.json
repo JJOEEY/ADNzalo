@@ -60,7 +60,7 @@
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/jest": "^29.5.14",
+    "@types/jest": "^30.0.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/mqtt": "^0.0.34",
     "@types/node": "^22.10.1",
@@ -76,7 +76,7 @@
     "cross-env": "^7.0.3",
     "electron": "^41.0.2",
     "electron-builder": "^26.8.1",
-    "jest": "^29.7.0",
+    "jest": "^30.5.1",
     "png2icons": "^2.0.1",
     "postcss": "^8.4.49",
     "rcedit": "^5.0.2",
