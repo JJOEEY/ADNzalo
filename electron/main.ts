@@ -1208,9 +1208,9 @@ app.whenReady().then(async () => {
   });
   console.log('[MediaCleanup] Scheduler initialized - runs daily at 3:00 AM');
 
-  // ADNzalo: TẮT auto-update để tránh bị đổi ngược phiên bản
-  // Muốn bật lại thì đổi publish repo sang JJOEEY/ADNzalo và bật flag này
-  const ADN_DISABLE_AUTOUPDATE = true;
+  // ADNzalo: bật auto-update — publish repo là JJOEEY/ADNzalo, release của mình,
+  // electron-updater chỉ lên bản mới hơn (không bao giờ hạ phiên bản).
+  const ADN_DISABLE_AUTOUPDATE = false;
   if (!isDev && !ADN_DISABLE_AUTOUPDATE) {
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;

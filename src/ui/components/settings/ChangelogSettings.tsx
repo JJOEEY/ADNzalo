@@ -15,6 +15,22 @@ interface VersionEntry {
 // ─── Changelog data - thêm entry mới vào ĐẦU mảng khi có bản cập nhật ────────
 const CHANGELOG: VersionEntry[] = [
   {
+    version: '1.3.2',
+    date: '09/2026',
+    type: 'patch',
+    highlights: [
+      '🔔 Bật lại thông báo cập nhật tự động trong app',
+    ],
+    changes: [
+      {
+        category: 'fixed',
+        items: [
+          'App tự kiểm tra bản mới khi mở + mỗi 4 giờ, hiện popup cập nhật (trước đây bị tắt cứng nên phải cài tay)',
+        ],
+      },
+    ],
+  },
+  {
     version: '1.3.1',
     date: '09/2026',
     type: 'patch',
