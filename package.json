@@ -1,6 +1,6 @@
 {
   "name": "ADNzalo",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "ADNzalo - Phần mềm desktop quản lý Zalo đa tài khoản tích hợp CRM, Campaign, Workflow và AI Assistant (gpt-5.6-luna) cho ADN Capital. Hỗ trợ quét thành viên ẩn và gửi theo SĐT/UID, Boss-Nhân viên WAN, proxy riêng từng nick.",
   "main": "dist-electron/electron/main.js",
   "scripts": {
