@@ -422,21 +422,60 @@ VÍ DỤ ĐẦU RA ĐÚNG:
         completionTokens = res.data.usage?.output_tokens || 0;
         totalTokens = promptTokens + completionTokens;
       } else {
-        Logger.info(`[AIAssistant] OpenAI-compat URL: ${openaiApiUrl}, model: ${model}`);
+        // OpenAI-compatible API (OpenAI, Deepseek, Grok/xAI, Mistral, OpenRouter)
         const tokenParam = assistant.platform === 'openai'
           ? { max_completion_tokens: maxTokens }
           : { max_tokens: maxTokens };
-        const res = await axios.post(
-          openaiApiUrl,
-          { model, messages, ...tokenParam, temperature },
-          {
-            headers: {
-              Authorization: `Bearer ${effectiveKey}`,
-              'Content-Type': 'application/json',
-            },
-            timeout: 60000,
+        const postOnce = (payload: any) =>
+          axios.post(
+            openaiApiUrl,
+            payload,
+            {
+              headers: {
+                Authorization: `Bearer ${effectiveKey}`,
+                'Content-Type': 'application/json',
+              },
+              timeout: 60000,
+            }
+          );
+        const basePayload: any = { model, messages, ...tokenParam, temperature };
+        let res: any;
+        try {
+          res = await postOnce(basePayload);
+        } catch (err: any) {
+          // Một số model đời mới (GPT-5/o-series/tương đương) từ chối 400 với
+          // temperature / role system / tham số token lạ → thích ứng rồi thử lại 1 lần.
+          if (err?.response?.status !== 400) throw err;
+          const pmsg = JSON.stringify(
+            err?.response?.data?.error ?? err?.response?.data ?? ''
+          ).toLowerCase();
+          const adapted: any = { ...basePayload };
+          let needRetry = false;
+          if (/temperature|top_p|presence_penalty|frequency_penalty|logprobs|sampling/.test(pmsg)) {
+            delete adapted.temperature;
+            delete adapted.top_p;
+            needRetry = true;
           }
-        );
+          if (/max_tokens|max_completion|unsupported.*token|token.*unsupported/.test(pmsg)) {
+            if ('max_completion_tokens' in adapted) {
+              delete adapted.max_completion_tokens;
+              adapted.max_tokens = maxTokens;
+            } else {
+              delete adapted.max_tokens;
+              adapted.max_completion_tokens = maxTokens;
+            }
+            needRetry = true;
+          }
+          if (/system.*role|role.*system|developer/.test(pmsg)) {
+            adapted.messages = (adapted.messages || []).map((m: any) =>
+              m?.role === 'system' ? { ...m, role: 'developer' } : m
+            );
+            needRetry = true;
+          }
+          if (!needRetry) throw err;
+          Logger.warn(`[AIAssistant] 400-adapt retry (stripped params) for ${assistant.platform}/${model}`);
+          res = await postOnce(adapted);
+        }
         // Parse response: support nhiều format khác ngoài OpenAI chuẩn
         let rawContent = res.data.choices?.[0]?.message?.content;
         if (!rawContent) rawContent = res.data.choices?.[0]?.text;           // Completions API
@@ -460,7 +499,9 @@ VÍ DỤ ĐẦU RA ĐÚNG:
       const errData = err.response?.data;
       const errMsg = errData?.error?.message || errData?.error || errData?.message || err.message;
       Logger.error(`[AIAssistant] callLLM FAILED → status=${status}, platform=${assistant.platform}, model=${assistant.model}, error=${JSON.stringify(errMsg)}, fullResponse=${JSON.stringify(errData)?.substring(0, 1000)}`);
-      throw err;
+      // Ném message gốc của provider lên UI thay vì "Request failed with status code 400" chung chung
+      const providerText = typeof errMsg === 'string' && errMsg ? errMsg : err.message;
+      throw new Error(`AI (${assistant.platform}/${model}): ${providerText}`);
     }
 
     // Log usage to DB

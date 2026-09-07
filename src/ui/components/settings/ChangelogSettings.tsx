@@ -15,6 +15,23 @@ interface VersionEntry {
 // ─── Changelog data - thêm entry mới vào ĐẦU mảng khi có bản cập nhật ────────
 const CHANGELOG: VersionEntry[] = [
   {
+    version: '1.3.1',
+    date: '09/2026',
+    type: 'patch',
+    highlights: [
+      '🛠️ Sửa lỗi AI báo 400 với model đời mới (tự thích ứng tham số + hiện đúng lỗi provider)',
+    ],
+    changes: [
+      {
+        category: 'fixed',
+        items: [
+          'AI tự thử lại khi provider từ chối 400 (bỏ temperature/đổi role system→developer/đổi tham số token)',
+          'Lỗi AI hiện message gốc của provider thay vì "Request failed with status code 400" chung chung',
+        ],
+      },
+    ],
+  },
+  {
     version: '1.3.0',
     date: '09/2026',
     type: 'minor',
