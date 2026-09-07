@@ -15,6 +15,29 @@ interface VersionEntry {
 // ─── Changelog data - thêm entry mới vào ĐẦU mảng khi có bản cập nhật ────────
 const CHANGELOG: VersionEntry[] = [
   {
+    version: '1.3.3',
+    date: '09/2026',
+    type: 'patch',
+    highlights: [
+      '🛠️ Sửa tabs nội dung bị nút AI che + preview tràn link dài + kịch bản AI dài đầy đủ ý',
+    ],
+    changes: [
+      {
+        category: 'fixed',
+        items: [
+          'Thanh editor tự xuống dòng khi nhiều biến thể — tabs Nội dung không còn bị che',
+          'Preview bẻ dòng cả link dài (overflow-wrap anywhere)',
+        ],
+      },
+      {
+        category: 'improved',
+        items: [
+          'AI viết kịch bản dài 400–1000 ký tự, đủ cấu trúc chào → giới thiệu → lợi ích → kêu gọi',
+        ],
+      },
+    ],
+  },
+  {
     version: '1.3.2',
     date: '09/2026',
     type: 'patch',

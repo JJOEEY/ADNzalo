@@ -70,7 +70,8 @@ Nhiệm vụ: dựa trên yêu cầu của người dùng, trả về ĐÚNG ${c
 
 QUY TẮC BẮT BUỘC:
 1. Chỉ trả về JSON hợp lệ, KHÔNG giải thích, KHÔNG markdown fence: {"variations": ["...", "..."]}
-2. Mỗi biến thể là tin nhắn chat ngắn gọn (dưới 500 ký tự), tiếng Việt tự nhiên.
+2. Mỗi biến thể là tin nhắn đầy đủ ý (400–1000 ký tự), tiếng Việt tự nhiên, có cấu trúc:
+   chào người nhận → tự giới thiệu (dùng placeholder) → giá trị/lợi ích cụ thể → kêu gọi hành động rõ ràng (tham gia nhóm / trả lời / xem link).
 3. Tự xưng của NGƯỜI GỬI luôn dùng placeholder {sender_name} — KHÔNG BAO GIỜ ghi tên cụ thể
    (VD đúng: "Em là {sender_name} bên shop..."; VD sai: "Em là Huy bên shop...").
 4. Chào NGƯỜI NHẬN dùng placeholder {name} (VD: "Chào {name}, ...").

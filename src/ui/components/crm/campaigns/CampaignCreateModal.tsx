@@ -199,7 +199,7 @@ function LivePreview({
               <div className="flex flex-col items-end gap-1.5 max-w-[85%]">
                 {/* Text bubble */}
                 {previewText && (
-                  <div className="bg-blue-600 text-white rounded-2xl rounded-br-sm px-3 py-2 text-xs leading-relaxed break-words whitespace-pre-wrap">
+                  <div className="bg-blue-600 text-white rounded-2xl rounded-br-sm px-3 py-2 text-xs leading-relaxed break-words whitespace-pre-wrap [overflow-wrap:anywhere]">
                     {supportsFormatting ? <MarkupPreview text={previewText} className="text-white" /> : previewText}
                   </div>
                 )}
@@ -929,11 +929,11 @@ export default function CampaignCreateModal({
           {/* ── CENTER: Editor ── */}
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden border-r border-gray-700">
             {/* Center topbar */}
-            <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-700 flex-shrink-0 min-h-[44px]">
+            <div className="flex items-center justify-between gap-x-2 gap-y-1.5 px-4 py-2.5 border-b border-gray-700 flex-shrink-0 min-h-[44px] flex-wrap">
               {hasMsg && !hasInvite ? (
                 <>
                   {/* Block tabs */}
-                  <div className="flex items-center gap-1 overflow-x-auto">
+                  <div className="flex items-center gap-1 overflow-x-auto flex-1 min-w-0 py-0.5">
                     {contentConfig.blocks.map((b, i) => (
                       <button key={b.id} type="button"
                         onClick={() => setActiveBlock(i)}
@@ -959,8 +959,8 @@ export default function CampaignCreateModal({
                       +
                     </button>
                   </div>
-                  {/* Right group: AI + mode toggle */}
-                  <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
+                  {/* Right group: AI + mode toggle (tự xuống dòng khi nhiều tab) */}
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
                     <button type="button" onClick={() => setShowAIDialog(true)}
                       title="AI viết kịch bản theo nick gửi ({sender_name})"
                       className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-colors border border-violet-500/40 text-violet-300 hover:bg-violet-500/15">
