@@ -6,7 +6,7 @@ import { useEmployeeStore } from '@/store/employeeStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import IntegrationDetailPage from './IntegrationDetailPage';
 import AIAssistantPage from './AIAssistantPage';
-import { AlertIcon, BotIcon, ChatIcon, CheckCircleIcon, CreditCardIcon, DollarIcon, GlobeIcon, LightningIcon, LockIcon, MenuIcon, PackageIcon, PinIcon, PluginIcon, RefreshIcon, RocketIcon, ShoppingCartIcon, ShuffleIcon, SparklesIcon, StoreIcon, TargetIcon, TruckIcon , CheckIcon } from '@/components/common/icons';
+import { AlertIcon, BotIcon, BrainIcon, ChatIcon, CheckCircleIcon, CreditCardIcon, DollarIcon, GlobeIcon, LightningIcon, LockIcon, MenuIcon, PackageIcon, PinIcon, PluginIcon, RefreshIcon, RocketIcon, ShoppingCartIcon, ShuffleIcon, SparklesIcon, StoreIcon, TargetIcon, TruckIcon , CheckIcon } from '@/components/common/icons';
 
 // ─── Catalog definition ───────────────────────────────────────────────────────
 
@@ -46,7 +46,9 @@ const AI_PLATFORMS: { key: string; label: string; icon: React.ReactNode; color: 
   { key: 'claude',   label: 'Claude',   icon: <AlertIcon className="w-4 h-4" />, color: 'bg-amber-600',   desc: 'Sonnet 4.6, Opus 4.8, Haiku 4.5' },
   { key: 'deepseek', label: 'DeepSeek', icon: <TargetIcon className="w-4 h-4" />, color: 'bg-purple-600',  desc: 'DeepSeek V3, R1' },
   { key: 'grok',     label: 'Grok',     icon: <LightningIcon className="w-4 h-4" />, color: 'bg-orange-600',  desc: 'Grok 3, Grok 3 Mini' },
-  { key: 'openrouter', label: 'OpenRouter', icon: <ShuffleIcon className="w-4 h-4" />, color: 'bg-indigo-600', desc: 'Gateway nhiều model qua một API key' },
+  { key: 'mistral',  label: 'Mistral',  icon: <BrainIcon className="w-4 h-4" />, color: 'bg-teal-600',    desc: 'Mistral Large/Small, Codestral' },
+  { key: 'openrouter', label: 'OpenRouter', icon: <ShuffleIcon className="w-4 h-4" />, color: 'bg-indigo-600', desc: 'Gateway nhi��?u model qua m��Tt API key' },
+  { key: '9router',  label: '9Router',  icon: <PluginIcon className="w-4 h-4" />, color: 'bg-slate-500',   desc: 'Gateway local — key nội bộ (localhost:20128)' },
 ];
 
 const AI_PLATFORM_META: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
@@ -55,7 +57,9 @@ const AI_PLATFORM_META: Record<string, { label: string; color: string; icon: Rea
   claude:   { label: 'Claude',   color: 'bg-amber-600',   icon: <AlertIcon className="w-4 h-4" /> },
   deepseek: { label: 'DeepSeek', color: 'bg-purple-600',  icon: <TargetIcon className="w-4 h-4" /> },
   grok:     { label: 'Grok',     color: 'bg-orange-600',  icon: <LightningIcon className="w-4 h-4" /> },
+  mistral:  { label: 'Mistral',  color: 'bg-teal-600',    icon: <BrainIcon className="w-4 h-4" /> },
   openrouter: { label: 'OpenRouter', color: 'bg-indigo-600', icon: <ShuffleIcon className="w-4 h-4" /> },
+  '9router': { label: '9Router',  color: 'bg-slate-500',   icon: <PluginIcon className="w-4 h-4" /> },
 };
 
 const CATALOG: Record<string, CatalogItem[]> = {
@@ -258,7 +262,7 @@ function AISection({ onNavigateAi }: { onNavigateAi: () => void }) {
             )}
           </div>
           <p className="text-[10px] text-gray-400">
-            5 nền tảng · Tự động gợi ý trả lời, chat với AI, knowledge base
+            8 nền tảng · Tự động gợi ý trả lời, chat với AI, knowledge base
           </p>
         </div>
         <button

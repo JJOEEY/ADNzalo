@@ -1105,6 +1105,7 @@ export default function CampaignCreateModal({
       {showAIDialog && hasMsg && (
         <CampaignAIScriptDialog
           senderName={senderName}
+          zaloId={zaloId}
           channel={channel}
           onApply={applyAIVariations}
           onClose={() => setShowAIDialog(false)}

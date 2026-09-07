@@ -8,6 +8,8 @@ import { type Channel } from '../../../../configs/channelConfig';
 interface CampaignAIScriptDialogProps {
   /** Tên nick gửi (prefill, sửa được) — dùng để preview, KHÔNG ghi cứng vào kịch bản */
   senderName: string;
+  /** zaloId nick gửi (nếu có) — để AI xưng hô đúng nick qua service */
+  zaloId?: string;
   channel: Channel;
   onApply: (texts: string[]) => void;
   onClose: () => void;
@@ -76,7 +78,7 @@ QUY TẮC BẮT BUỘC:
 6. Không dùng ký tự trang trí quá đà, tối đa 2 emoji mỗi tin.`;
 }
 
-export default function CampaignAIScriptDialog({ senderName: initialSender, channel, onApply, onClose }: CampaignAIScriptDialogProps) {
+export default function CampaignAIScriptDialog({ senderName: initialSender, zaloId, channel, onApply, onClose }: CampaignAIScriptDialogProps) {
   const { showNotification, setView } = useAppStore();
   const [product, setProduct] = useState('');
   const [goal, setGoal] = useState(GOALS[0].value);
@@ -128,6 +130,7 @@ export default function CampaignAIScriptDialog({ senderName: initialSender, chan
         [{ role: 'system', content: buildSystemPrompt(count) }, { role: 'user', content: userMsg }],
         false,
         8000,
+        zaloId || undefined,
       );
       if (!res?.success || !res.result) {
         setError(res?.error || 'AI không trả về kết quả');

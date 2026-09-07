@@ -279,7 +279,7 @@ export default function MessageInput() {
         setAiSuggestionsLoading(false);
         return;
       }
-      const res = await ipc.ai?.suggest(assistantId, recent);
+      const res = await ipc.ai?.suggest(assistantId, recent, activeAccountId || undefined);
       if (res?.success && res.suggestions?.length) {
         setAiSuggestions(res.suggestions);
         aiSuggestCacheRef.current = { hash: contextHash, suggestions: res.suggestions };

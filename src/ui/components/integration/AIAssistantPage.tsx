@@ -4,7 +4,7 @@ import DataAccessor from '@/lib/data/DataAccessor';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import AIAssistantDetailPage from './AIAssistantDetailPage';
 import AccountAssignmentPopup from '@/components/chat/AccountAssignmentPopup';
-import { AlertIcon, BotIcon, LightningIcon, SparklesIcon, TargetIcon, UserIcon } from '@/components/common/icons';
+import { AlertIcon, BotIcon, BrainIcon, LightningIcon, PluginIcon, ShuffleIcon, SparklesIcon, TargetIcon, UserIcon } from '@/components/common/icons';
 
 const PLATFORM_META: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   openai:   { label: 'OpenAI',   color: 'bg-green-600',   icon: <BotIcon className="w-4 h-4" /> },
@@ -12,6 +12,9 @@ const PLATFORM_META: Record<string, { label: string; color: string; icon: React.
   claude:   { label: 'Claude',   color: 'bg-amber-600',   icon: <AlertIcon className="w-4 h-4" /> },
   deepseek: { label: 'DeepSeek', color: 'bg-purple-600',  icon: <TargetIcon className="w-4 h-4" /> },
   grok:     { label: 'Grok',     color: 'bg-orange-600',  icon: <LightningIcon className="w-4 h-4" /> },
+  mistral:  { label: 'Mistral',  color: 'bg-teal-600',    icon: <BrainIcon className="w-4 h-4" /> },
+  openrouter: { label: 'OpenRouter', color: 'bg-indigo-600', icon: <ShuffleIcon className="w-4 h-4" /> },
+  '9router': { label: '9Router', color: 'bg-slate-500',   icon: <PluginIcon className="w-4 h-4" /> },
 };
 
 interface AIAssistantSummary {

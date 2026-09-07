@@ -1769,8 +1769,9 @@ class WorkflowEngineService {
 
       // ── AI (Multi-platform: OpenAI, Gemini, Deepseek, Grok) ─────────────
       case 'ai.generateText': {
-        // If assistantId is provided, delegate to AIAssistantService
-        if (cfg.assistantId) {
+        // Assistant mode (kể cả assistantId rỗng từ template) → delegate để
+        // service tự resolve trợ lý mặc định; chỉ direct-key khi user chọn
+        if (cfg.assistantId || cfg.aiConfigMode === 'assistant') {
           try {
             const AIAssistantService = (await import('../ai/AIAssistantService')).default;
             const chatMsgs: { role: string; content: string }[] = [];
@@ -1892,7 +1893,7 @@ class WorkflowEngineService {
           return { result, totalTokens, model };
         } else {
           // OpenAI-compatible API (OpenAI, Deepseek, Grok/xAI, Mistral, OpenRouter)
-          const apiUrl = this.getOpenAICompatibleUrl(platform);
+          const apiUrl = this.getOpenAICompatibleUrl(platform, cfg.baseUrl);
           const tokenParam = platform === 'openai'
             ? { max_completion_tokens: maxTokens }
             : { max_tokens: maxTokens };
@@ -1926,8 +1927,8 @@ class WorkflowEngineService {
           .split(',').map((s: string) => s.trim()).filter(Boolean);
         const systemMsg = `Bạn là bộ phân loại văn bản. Hãy phân loại đoạn văn bản đầu vào vào MỘT trong các danh mục sau: ${categories.join(', ')}. Chỉ trả về đúng tên danh mục, không giải thích thêm.`;
 
-        // If assistantId is provided, delegate to AIAssistantService
-        if (cfg.assistantId) {
+        // Assistant mode (kể cả assistantId rỗng) → service tự resolve mặc định
+        if (cfg.assistantId || cfg.aiConfigMode === 'assistant') {
           try {
             const AIAssistantService = (await import('../ai/AIAssistantService')).default;
             const chatMsgs = [
@@ -1987,7 +1988,7 @@ class WorkflowEngineService {
           return { category, input: cfg.input };
         } else {
           // OpenAI-compatible API (OpenAI, Deepseek, Grok/xAI, Mistral, OpenRouter)
-          const apiUrl = this.getOpenAICompatibleUrl(platform);
+          const apiUrl = this.getOpenAICompatibleUrl(platform, cfg.baseUrl);
           const tokenParam = platform === 'openai'
             ? { max_completion_tokens: 30 }
             : { max_tokens: 30 };
@@ -3305,11 +3306,19 @@ class WorkflowEngineService {
   }
 
   /** Get the OpenAI-compatible chat/completions URL for a given platform */
-  private getOpenAICompatibleUrl(platform: string): string {
+  private getOpenAICompatibleUrl(platform: string, baseUrl?: string | null): string {
+    // Custom gateway (9Router local, OpenRouter, proxy...) — ưu tiên baseUrl của node
+    const base = (baseUrl || '').trim();
+    if (base) {
+      if (base.endsWith('/chat/completions') || /\/v\d+\/chat\/completions$/.test(base)) return base;
+      if (/\/v\d+$/.test(base)) return `${base}/chat/completions`;
+      return `${base}/v1/chat/completions`;
+    }
     switch (platform) {
       case 'deepseek':   return 'https://api.deepseek.com/v1/chat/completions';
       case 'grok':       return 'https://api.x.ai/v1/chat/completions';
       case 'mistral':    return 'https://api.mistral.ai/v1/chat/completions';
+      case '9router':    return 'http://localhost:20128/v1/chat/completions';
       case 'openrouter': return 'https://openrouter.ai/api/v1/chat/completions';
       case 'openai':
       default:           return 'https://api.openai.com/v1/chat/completions';

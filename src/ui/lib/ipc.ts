@@ -406,8 +406,8 @@ declare global {
         getFiles:        (assistantId: string) => Promise<{ success: boolean; files: any[]; error?: string }>;
         uploadFile:      (assistantId: string, filePath: string) => Promise<{ success: boolean; id?: number; fileName?: string; error?: string }>;
         removeFile:      (fileId: number) => Promise<{ success: boolean; error?: string }>;
-        suggest:         (assistantId: string, chatHistory: any[]) => Promise<{ success: boolean; suggestions: string[]; error?: string }>;
-        chat:            (assistantId: string, messages: any[], structured?: boolean, maxTokens?: number) => Promise<{ success: boolean; result?: string; totalTokens?: number; promptTokens?: number; completionTokens?: number; error?: string }>;
+        suggest:         (assistantId: string, chatHistory: any[], zaloId?: string) => Promise<{ success: boolean; suggestions: string[]; error?: string }>;
+        chat:            (assistantId: string, messages: any[], structured?: boolean, maxTokens?: number, zaloId?: string) => Promise<{ success: boolean; result?: string; totalTokens?: number; promptTokens?: number; completionTokens?: number; error?: string }>;
         getAccountAssistant:  (zaloId: string, role: string) => Promise<{ success: boolean; assistant?: any | null; error?: string }>;
         setAccountAssistant:  (zaloId: string, role: string, assistantId: string | null) => Promise<{ success: boolean; error?: string }>;
         getAccountAssistants: (zaloId: string) => Promise<{ success: boolean; suggestion?: string | null; panel?: string | null; error?: string }>;

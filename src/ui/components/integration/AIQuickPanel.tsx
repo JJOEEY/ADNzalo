@@ -10,7 +10,7 @@ import { useChatStore } from '@/store/chatStore';
 import { useAccountStore } from '@/store/accountStore';
 import { useAppStore } from '@/store/appStore';
 import { parseStructuredResponse } from '../../../utils/aiUtils';
-import { BotIcon, ClipboardListIcon, DiamondIcon, EditIcon, FileTextIcon, HelpCircleIcon, LightningIcon, SparklesIcon, StarIcon, TargetIcon } from '@/components/common/icons';
+import { AlertIcon, BotIcon, BrainIcon, ClipboardListIcon, DiamondIcon, EditIcon, FileTextIcon, HelpCircleIcon, LightningIcon, SparklesIcon, StarIcon, TargetIcon } from '@/components/common/icons';
 
 
 interface ChatMsg {
@@ -32,12 +32,17 @@ interface AssistantSummary {
 const PLATFORM_ICONS: Record<string, React.ReactNode> = {
   openai: <BotIcon className="w-4 h-4" />,
   gemini: <SparklesIcon className="w-4 h-4" />,
+  claude: <AlertIcon className="w-4 h-4" />,
   deepseek: <HelpCircleIcon className="w-4 h-4" />,
   grok: <LightningIcon className="w-4 h-4" />,
+  mistral: <BrainIcon className="w-4 h-4" />,
+  openrouter: <StarIcon className="w-4 h-4" />,
+  '9router': <DiamondIcon className="w-4 h-4" />,
 };
 // Text fallback for use in <option> elements (cannot render JSX)
 const PLATFORM_ICON_TEXTS: Record<string, string> = {
-  openai: '[AI]', gemini: '[G]', deepseek: '[DS]', grok: '[Grok]',
+  openai: '[AI]', gemini: '[G]', claude: '[Claude]', deepseek: '[DS]', grok: '[Grok]',
+  mistral: '[Mistral]', openrouter: '[OR]', '9router': '[9R]',
 };
 
 const clampContextCount = (value: number) => Math.min(100, Math.max(1, Math.round(value)));
@@ -212,7 +217,7 @@ export default function AIQuickPanel({ onClose }: { onClose: () => void }) {
       }
       msgsToSend.push(...panelMsgs);
 
-      const res = await ipc.ai?.chat(activeId, msgsToSend, true);
+      const res = await ipc.ai?.chat(activeId, msgsToSend, true, undefined, activeAccountId || undefined);
       if (res?.success && res.result) {
         const segments = parseStructuredResponse(res.result);
         const assistantMsg: ChatMsg = { role: 'assistant', content: res.result!, segments: segments || undefined };
@@ -259,7 +264,7 @@ export default function AIQuickPanel({ onClose }: { onClose: () => void }) {
     const userMsg: ChatMsg = { role: 'user', content: 'Tóm tắt hội thoại' };
     setMessages(prev => [...prev, userMsg]);
     try {
-      const res = await ipc.ai?.chat(activeId, [{ role: 'user', content: summaryPrompt }]);
+      const res = await ipc.ai?.chat(activeId, [{ role: 'user', content: summaryPrompt }], undefined, undefined, activeAccountId || undefined);
       if (res?.success && res.result) {
         setMessages(prev => [...prev, { role: 'assistant', content: res.result! }]);
       } else {
