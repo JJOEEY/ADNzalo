@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import DataAccessor from '@/lib/data/DataAccessor';
 import ipc from '@/lib/ipc';
+import { useAccountStore } from '@/store/accountStore';
+import CampaignAIScriptDialog from './CampaignAIScriptDialog';
 import { toLocalMediaUrl } from '@/lib/localMedia';
 import { Spinner } from '@/components/common/PageLoading';
-import { AlertIcon, ChartIcon, ChatIcon, ClipboardListIcon, EditIcon, RocketIcon, SendIcon, ShuffleIcon, UserCheckIcon, UsersIcon } from '@/components/common/icons';
+import { AlertIcon, ChartIcon, ChatIcon, ClipboardListIcon, EditIcon, RocketIcon, SendIcon, ShuffleIcon, SparklesIcon, UserCheckIcon, UsersIcon } from '@/components/common/icons';
 import { parseMarkup } from '../../../../services/crm/message-markup';
 import { type Channel } from '../../../../configs/channelConfig';
 
@@ -42,10 +44,12 @@ interface CampaignCreateModalProps {
 }
 
 // Preview substitution - replaces variables with dummy values (ADN: hỗ trợ <Xưng hô> <Tên>)
-function substitutePreview(text: string): string {
+// {sender_name} = tên nick gửi — preview theo nick đang tạo campaign, lúc gửi resolve theo từng nick
+function substitutePreview(text: string, senderName?: string): string {
   return (text || '')
     .replace(/\{name\}/g, 'Nguyễn Văn A')
     .replace(/\{userId\}/g, '0987654321')
+    .replace(/\{sender_name\}/g, senderName || 'Tên nick gửi')
     .replace(/<Xưng hô>/g, 'Anh')
     .replace(/<Tên Zalo người nhận>/g, 'Nguyễn Văn A')
     .replace(/<Tên>/g, 'Nguyễn Văn A')
@@ -78,7 +82,7 @@ function parseMixedConfig(raw?: string): MixedConfig {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const TEMPLATE_VARS = ['{name}', '{userId}', '<Xưng hô>', '<Tên Zalo người nhận>'];
+const TEMPLATE_VARS = ['{name}', '{userId}', '{sender_name}', '<Xưng hô>', '<Tên Zalo người nhận>'];
 
 /** Format delay range for display */
 function fmtDelayRange(min: number, max: number): string {
@@ -124,7 +128,7 @@ const INVITE_ERROR_LABELS: Record<number, string> = {
 
 function LivePreview({
   blocks, activeIdx, mode, type, friendMsg,
-  onTabChange, supportsFormatting,
+  onTabChange, supportsFormatting, senderName,
 }: {
   blocks: ContentBlock[];
   activeIdx: number;
@@ -133,12 +137,13 @@ function LivePreview({
   friendMsg: string;
   onTabChange: (i: number) => void;
   supportsFormatting: boolean;
+  senderName?: string;
 }) {
   const block = blocks[activeIdx] ?? blocks[0];
 
   const previewText = type === 'friend_request'
-    ? substitutePreview(friendMsg)
-    : substitutePreview(block?.text ?? '');
+    ? substitutePreview(friendMsg, senderName)
+    : substitutePreview(block?.text ?? '', senderName);
 
   const hasImages = (block?.images?.length ?? 0) > 0;
   const isFR      = type === 'friend_request';
@@ -593,6 +598,28 @@ export default function CampaignCreateModal({
     setActiveBlock(i => Math.min(i, contentConfig.blocks.length - 1));
   }, [contentConfig.blocks.length]);
 
+  // Tên nick gửi — dùng cho preview {sender_name} + prefill dialog AI
+  const accounts = useAccountStore((s) => s.accounts);
+  const activeAccountId = useAccountStore((s) => s.activeAccountId);
+  const senderAccount = accounts.find((a) => a.zalo_id === zaloId) ?? accounts.find((a) => a.zalo_id === activeAccountId);
+  const senderName = senderAccount?.full_name || senderAccount?.display_name || '';
+  const [showAIDialog, setShowAIDialog] = useState(false);
+
+  // Thêm biến thể AI: nếu các block hiện tại đều trống thì thay thế, ngược lại append
+  const applyAIVariations = (texts: string[]) => {
+    const fresh = texts.filter((t) => t.trim()).map((t) => ({ id: genId(), text: t.trim(), images: [] as string[] }));
+    if (!fresh.length) return;
+    setContentConfig((prev) => {
+      const allEmpty = prev.blocks.every((b) => !b.text.trim() && b.images.length === 0);
+      if (allEmpty) {
+        setActiveBlock(0);
+        return { ...prev, blocks: fresh };
+      }
+      setActiveBlock(prev.blocks.length);
+      return { ...prev, blocks: [...prev.blocks, ...fresh] };
+    });
+  };
+
   const addBlock = () => {
     setContentConfig(prev => {
       const next = { ...prev, blocks: [...prev.blocks, { id: genId(), text: '', images: [] }] };
@@ -934,25 +961,33 @@ export default function CampaignCreateModal({
                       +
                     </button>
                   </div>
-                  {/* Mode toggle (only when multiple blocks) */}
-                  {contentConfig.blocks.length > 1 && (
-                    <div className="flex items-center gap-1 ml-2 flex-shrink-0">
-                      {([
-                        { value: 'random' as SendMode, icon: <ShuffleIcon className="w-4 h-4" />, label: 'Random' },
-                        { value: 'all' as SendMode,    icon: <SendIcon className="w-4 h-4" />, label: 'Tất cả' },
-                      ]).map(opt => (
-                        <button key={opt.value} type="button"
-                          onClick={() => setContentConfig(prev => ({ ...prev, mode: opt.value }))}
-                          className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-colors border ${
-                            contentConfig.mode === opt.value
-                              ? 'bg-blue-600 border-blue-500 text-white'
-                              : 'border-gray-600 text-gray-400 hover:text-gray-200'
-                          }`}>
-                          <span>{opt.icon}</span> {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  {/* Right group: AI + mode toggle */}
+                  <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
+                    <button type="button" onClick={() => setShowAIDialog(true)}
+                      title="AI viết kịch bản theo nick gửi ({sender_name})"
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-colors border border-violet-500/40 text-violet-300 hover:bg-violet-500/15">
+                      <SparklesIcon className="w-3.5 h-3.5" /> AI viết kịch bản
+                    </button>
+                    {/* Mode toggle (only when multiple blocks) */}
+                    {contentConfig.blocks.length > 1 && (
+                      <div className="flex items-center gap-1">
+                        {([
+                          { value: 'random' as SendMode, icon: <ShuffleIcon className="w-4 h-4" />, label: 'Random' },
+                          { value: 'all' as SendMode,    icon: <SendIcon className="w-4 h-4" />, label: 'Tất cả' },
+                        ]).map(opt => (
+                          <button key={opt.value} type="button"
+                            onClick={() => setContentConfig(prev => ({ ...prev, mode: opt.value }))}
+                            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-colors border ${
+                              contentConfig.mode === opt.value
+                                ? 'bg-blue-600 border-blue-500 text-white'
+                                : 'border-gray-600 text-gray-400 hover:text-gray-200'
+                            }`}>
+                            <span>{opt.icon}</span> {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </>
               ) : hasFR && !hasMsg ? (
                 <>
@@ -1044,6 +1079,7 @@ export default function CampaignCreateModal({
               friendMsg={friendReqMsg}
               onTabChange={setActiveBlock}
               supportsFormatting={!telegramCampaign}
+              senderName={senderName}
             />
           </div>
         </div>
@@ -1066,6 +1102,16 @@ export default function CampaignCreateModal({
           </button>
         </div>
       </div>
+
+      {/* AI viết kịch bản */}
+      {showAIDialog && hasMsg && (
+        <CampaignAIScriptDialog
+          senderName={senderName}
+          channel={channel}
+          onApply={applyAIVariations}
+          onClose={() => setShowAIDialog(false)}
+        />
+      )}
     </div>
   );
 }

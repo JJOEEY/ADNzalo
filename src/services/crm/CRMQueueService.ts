@@ -247,10 +247,14 @@ class CRMQueueService {
             }
 
             // ── Template preparation ───────────────────────────────────────
+            // {sender_name} = tên nick gửi (mỗi nick tự xưng tên mình) — resolve
+            // từ account gửi tại thời điểm gửi, cùng cơ chế với {name} người nhận.
+            const senderName = (account as any)?.full_name || (account as any)?.display_name || '';
             substitute = (tpl: string) =>
                 (tpl || '')
                     .replace(/\{name\}/g, effectiveDisplayName || item.contact_id)
-                    .replace(/\{userId\}/g, effectiveContactId);
+                    .replace(/\{userId\}/g, effectiveContactId)
+                    .replace(/\{sender_name\}/g, senderName);
 
             campaignType = (item as any).campaign_type || 'message';
             isGroup = (item as any).contact_type === 'group';
