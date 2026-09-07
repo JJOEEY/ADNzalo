@@ -725,6 +725,13 @@ export default function ChatHeader() {
               className="flex items-center gap-1 group text-left min-w-0 overflow-hidden"
             >
               <p className="text-md font-semibold text-white truncate group-hover:text-blue-300 transition-colors">{displayName}</p>
+              {mergedInboxMode && activeAccount && (
+                <span
+                  className="text-[9px] font-normal px-1.5 py-px rounded bg-purple-600/25 text-purple-300 whitespace-nowrap flex-shrink-0"
+                  title={`Đang xem nick: ${activeAccount.full_name || activeAccountId}`}>
+                  {(activeAccount.full_name || activeAccountId || '').slice(0, 12)}
+                </span>
+              )}
               {copied
                 ? <span className="text-xs text-green-400 flex-shrink-0">✓</span>
                 : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-50 flex-shrink-0 transition-opacity">

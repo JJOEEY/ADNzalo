@@ -956,7 +956,7 @@ export default function ConversationList() {
     if (!othersConversations.has(c.contact_id)) return s;
     return s + (c.unread_count > 0 ? 1 : 0);
   }, 0);
-  // const unrepliedCount = accountContacts.reduce((s, c) => s + (c.unread_count > 0 && c.is_replied !== 1 ? 1 : 0), 0);
+  const unrepliedCount = accountContacts.reduce((s, c) => s + (c.unread_count > 0 && c.is_replied !== 1 ? 1 : 0), 0);
   const othersCount = accountContacts.reduce((s, c) => s + (othersConversations.has(c.contact_id) ? 1 : 0), 0);
 
   // ── Filtered list: dùng DB result khi có filter, fallback memory filter ──
@@ -2282,19 +2282,19 @@ export default function ConversationList() {
 
           {moreMenuOpen && (
             <div className="absolute top-full left-0 z-30 bg-gray-800 border border-gray-700 rounded-xl shadow-xl min-w-[160px] py-1 mt-1">
-              {/*<button*/}
-              {/*  onClick={() => {*/}
-              {/*    setFilter('unreplied');*/}
-              {/*    setFilterLabelId(null);*/}
-              {/*    setMoreMenuOpen(false);*/}
-              {/*  }}*/}
-              {/*  className={`w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-700 text-left ${filter === 'unreplied' ? 'text-white bg-gray-700/50' : 'text-gray-300'}`}*/}
-              {/*>*/}
-              {/*  <span><ChatIcon className="w-4 h-4" /></span>*/}
-              {/*  <span>Chưa trả lời</span>*/}
-              {/*  {unrepliedCount > 0 && <span className="ml-auto bg-blue-600 text-white text-xs rounded-full px-1.5 min-w-[18px] text-center">{unrepliedCount}</span>}*/}
-              {/*  {filter === 'unreplied' && <span className="ml-auto text-blue-400">✓</span>}*/}
-              {/*</button>*/}
+              <button
+                onClick={() => {
+                  setFilter('unreplied');
+                  setFilterLabelIds([]);
+                  setMoreMenuOpen(false);
+                }}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-700 text-left ${filter === 'unreplied' ? 'text-white bg-gray-700/50' : 'text-gray-300'}`}
+              >
+                <span><ChatIcon className="w-4 h-4" /></span>
+                <span>Chưa trả lời</span>
+                {unrepliedCount > 0 && <span className="ml-auto bg-blue-600 text-white text-xs rounded-full px-1.5 min-w-[18px] text-center">{unrepliedCount}</span>}
+                {filter === 'unreplied' && <span className="ml-auto text-blue-400">✓</span>}
+              </button>
 
               <button
                 onClick={() => {
@@ -2495,9 +2495,17 @@ export default function ConversationList() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-1">
                   <span className="text-sm font-medium text-gray-200 truncate flex items-center gap-1">
-                    {isLocalPinned && <span title="Ghim trong app">📍</span>}
+                    {isLocalPinned && <span title="Ghim trong app">📌</span>}
                     {isPinned && <span title="Ghim Zalo"><PinIcon className="w-4 h-4" /></span>}
                     {contact.alias || contact.display_name || contact.contact_id}
+                    {/* Tag nick sở hữu — chỉ trong chế độ Gộp trang */}
+                    {mergedInboxMode && ownerAcc && (
+                      <span
+                        className="text-[9px] font-normal px-1.5 py-px rounded bg-purple-600/25 text-purple-300 whitespace-nowrap flex-shrink-0"
+                        title={`Nick: ${ownerAcc.full_name || ownerAcc.zalo_id}`}>
+                        {(ownerAcc.full_name || ownerAcc.zalo_id || '').slice(0, 12)}
+                      </span>
+                    )}
                   </span>
                   {/* Fixed-width slot: always reserve space to prevent layout shift on hover */}
                   <div className="flex-shrink-0 w-14 flex items-center justify-end gap-1">

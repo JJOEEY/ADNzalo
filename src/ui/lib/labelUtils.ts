@@ -42,65 +42,92 @@ export interface SyncZaloLabelsOptions {
  * Returns the number of labels actually upserted.
  */
 export async function syncZaloLabelsToLocalDB(opts: SyncZaloLabelsOptions): Promise<number> {
-    const {zaloLabels, activeZaloId, mode, existingLocalLabels} = opts;
-    if (!zaloLabels || zaloLabels.length === 0) return 0;
+    const res = await syncZaloLabelsLinked(opts);
+    return res.added + res.updated;
+}
 
-    // Build a Set of existing label names for merge dedup
-    let existingNames = new Set<string>();
-    if (mode === 'merge') {
-        if (existingLocalLabels) {
-            existingNames = new Set(existingLocalLabels.map(l => l.name.toLowerCase()));
-        } else {
-            try {
-                const res = await DataAccessor.getLocalLabels({zaloId: activeZaloId});
-                const labels: any[] = res?.labels || [];
-                existingNames = new Set(labels.map((l: any) => (l.name || '').toLowerCase()));
-            } catch { /* ignore */
-            }
-        }
-    }
+/**
+ * Sync Zalo → local có liên kết 2 chiều (P4.1):
+ * - Nhãn đã link: lan truyền đổi tên/màu/emoji từ Zalo (mirror).
+ * - Tên trùng nhãn local chưa link: nhận link (adopt), giữ nguyên gán luồng.
+ * - Nhãn Zalo đã xóa: gỡ link (mirror thành nhãn local thường, giữ gán luồng).
+ * - mode 'replace': xóa hết rồi tạo lại có link (hành vi cũ).
+ */
+export async function syncZaloLabelsLinked(opts: SyncZaloLabelsOptions): Promise<{ added: number; updated: number; unlinked: number }> {
+    const out = { added: 0, updated: 0, unlinked: 0 };
+    const { zaloLabels, activeZaloId, mode } = opts;
+    if (!zaloLabels || zaloLabels.length === 0) return out;
 
-    // Mode = 'replace' removeAllLabels done and add labels new
+    let existing: any[] = [];
+    try {
+        const res = await DataAccessor.getLocalLabels({ zaloId: activeZaloId });
+        existing = res?.labels || [];
+    } catch { /* ignore */ }
+
     if (mode === 'replace') {
-        try {
-            const res = await DataAccessor.getLocalLabels({zaloId: activeZaloId});
-            const labels: any[] = res?.labels || [];
-            for (const label of labels) {
-                if (label?.id == null) continue;
-                await DataAccessor.deleteLocalLabel({id: label.id});
-            }
-        } catch { /* ignore */
+        for (const label of existing) {
+            if (label?.id == null) continue;
+            try { await DataAccessor.deleteLocalLabel({ id: label.id }); } catch { /* ignore */ }
         }
+        existing = [];
     }
 
-    let count = 0;
+    const byLink = new Map<number, any>();
+    const byName = new Map<string, any>();
+    for (const l of existing) {
+        if (l.zalo_label_id != null) byLink.set(Number(l.zalo_label_id), l);
+        const key = String(l.name || '').toLowerCase();
+        if (key && !byName.has(key)) byName.set(key, l);
+    }
+
+    const seenZaloIds = new Set<number>();
+    let order = 0;
     for (const zLabel of zaloLabels) {
         const name = getZaloLabelName(zLabel);
         if (!name) continue;
-
-        // In merge mode, skip if a label with the same name already exists
-        if (mode === 'merge' && existingNames.has(name.toLowerCase())) continue;
-
+        const zid = Number(zLabel.id);
+        if (Number.isFinite(zid)) seenZaloIds.add(zid);
         const color = zLabel.color || '#3b82f6';
         const emoji = zLabel.emoji || zLabel.icon || '🏷️';
-        const textColor = '#ffffff';
+        const base = {
+            name, color, textColor: '#ffffff', emoji,
+            pageIds: activeZaloId, isActive: 1, sortOrder: order++,
+            zaloLabelId: Number.isFinite(zid) ? zid : null,
+        };
+        try {
+            const linked = Number.isFinite(zid) ? byLink.get(zid) : undefined;
+            if (linked) {
+                if (linked.name !== name || linked.color !== color || linked.emoji !== emoji) {
+                    await DataAccessor.upsertLocalLabel({ label: { ...base, id: linked.id } });
+                    out.updated++;
+                }
+                continue;
+            }
+            const sameName = byName.get(name.toLowerCase());
+            if (mode === 'merge' && sameName) {
+                await DataAccessor.upsertLocalLabel({ label: { ...base, id: sameName.id } });
+                byName.delete(name.toLowerCase());
+                out.updated++;
+                continue;
+            }
+            await DataAccessor.upsertLocalLabel({ label: base });
+            out.added++;
+        } catch { /* skip individual failures */ }
+    }
 
+    for (const [zid, local] of byLink) {
+        if (seenZaloIds.has(zid)) continue;
         try {
             await DataAccessor.upsertLocalLabel({
                 label: {
-                    name,
-                    color,
-                    textColor,
-                    emoji,
-                    pageIds: activeZaloId,
-                    isActive: 1,
-                    sortOrder: count,
+                    name: local.name, color: local.color, textColor: local.text_color || '#ffffff',
+                    emoji: local.emoji, pageIds: local.page_ids || activeZaloId,
+                    isActive: local.is_active ?? 1, sortOrder: local.sort_order ?? 0,
+                    id: local.id, zaloLabelId: null,
                 },
             });
-            count++;
-        } catch { /* skip individual failures */
-        }
+            out.unlinked++;
+        } catch { /* ignore */ }
     }
-
-    return count;
+    return out;
 }

@@ -3350,8 +3350,8 @@ export default function MessageInput() {
       {/* ── Toolbar row ── */}
       <div className="flex items-center gap-1 px-2 pt-2 pb-1 border-b border-gray-700/50">
         {/* Emoji / Biểu cảm */}
-        {/* Sticker (ẩn trong employee mode nếu không có permission, ẩn cho Telegram tạm thời) */}
-        {channelCap.supportsSticker && hasChatPermission && !isTelegramUser(activeContact?.channel) && !isTelegramBot(activeContact?.channel) && (
+        {/* Sticker (ẩn trong employee mode nếu không có permission; ẩn cho Telegram Bot) */}
+        {channelCap.supportsSticker && hasChatPermission && !isTelegramBot(activeContact?.channel) && (
         <div className="relative">
           <ToolbarBtn onClick={handleSendSticker} title="Sticker" active={showStickerPicker}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

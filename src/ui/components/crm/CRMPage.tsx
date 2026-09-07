@@ -17,6 +17,7 @@ import LocalLabelSelector from '@/components/common/LocalLabelSelector';
 import QueueStatusBar from './queue/QueueStatusBar';
 import SendHistoryLog from './queue/SendHistoryLog';
 import GroupMembersTab from './groups/GroupMembersTab';
+import ClientPoolTab from './pool/ClientPoolTab';
 import CRMSearchTab from './search/CRMSearchTab';
 import CRMRequestsTab from './search/CRMRequestsTab';
 import AddToContactsModal from './contacts/AddToContactsModal';
@@ -29,7 +30,7 @@ import { Spinner } from '@/components/common/PageLoading';
 import { CHANNEL } from '@/lib/channelHelper';
 import {
   CampaignIcon, ChartIcon, ClipboardListIcon, CloudIcon, HardDriveIcon, SearchIcon, SendIcon, UserIcon,
-  UserPlusIcon, UsersIcon, WifiIcon
+  UserPlusIcon, UsersIcon, WifiIcon, BriefcaseIcon
 } from '@/components/common/icons';
 
 
@@ -140,7 +141,7 @@ export default function CRMPage() {
   const loadContacts = useCallback(async () => {
     if (!activeAccountId) return;
     store.setContactsLoading(true);
-    // Strip client-only filters (has_phone, has_notes) before sending to backend
+    // Lọc backend (P1.4): gender/birthday/phone/notes/nhãn local chạy trước phân trang
     const backendContactTypes = store.filterContactTypes.filter(t => t !== 'has_phone' && t !== 'has_notes');
     const res = await DataAccessor.getCRMContacts({
       zaloId: activeAccountId,
@@ -148,6 +149,11 @@ export default function CRMPage() {
         search: store.searchText,
         contactTypes: backendContactTypes.length > 0 ? backendContactTypes : undefined,
         contactType: backendContactTypes.length === 0 ? 'all' : undefined,
+        gender: store.filterGender,
+        birthday: store.filterBirthday,
+        hasPhone: store.filterContactTypes.includes('has_phone'),
+        hasNotes: store.filterContactTypes.includes('has_notes'),
+        localLabelIds: store.filterLocalLabelIds,
         sortBy: store.sortBy,
         sortDir: store.sortDir,
         limit: store.pageSize,
@@ -156,7 +162,7 @@ export default function CRMPage() {
     });
     store.setContactsLoading(false);
     if (res?.success) store.setContacts(res.contacts, res.total);
-  }, [activeAccountId, store.searchText, store.filterContactTypes, store.sortBy, store.sortDir, store.page, store.pageSize]);
+  }, [activeAccountId, store.searchText, store.filterContactTypes, store.filterGender, store.filterBirthday, store.filterLocalLabelIds, store.sortBy, store.sortDir, store.page, store.pageSize]);
 
   const loadCampaigns = useCallback(async () => {
     if (!activeAccountId) return;
@@ -214,7 +220,7 @@ export default function CRMPage() {
     }
     loadContacts(); loadCampaigns(); loadGroupCount(); loadRequestCount();
   }, [activeAccountId]);
-  useEffect(() => { loadContacts(); }, [store.searchText, store.filterContactTypes, store.sortBy, store.sortDir, store.page, store.pageSize]);
+  useEffect(() => { loadContacts(); }, [store.searchText, store.filterContactTypes, store.filterGender, store.filterBirthday, store.filterLocalLabelIds, store.sortBy, store.sortDir, store.page, store.pageSize]);
 
   // Listen for crm-contacts-changed to refresh contacts list (e.g. after AddToContactsModal)
   useEffect(() => {
@@ -554,6 +560,11 @@ export default function CRMPage() {
         search: store.searchText,
         contactTypes: backendContactTypes.length > 0 ? backendContactTypes : undefined,
         contactType: backendContactTypes.length === 0 ? 'all' : undefined,
+        gender: store.filterGender,
+        birthday: store.filterBirthday,
+        hasPhone: store.filterContactTypes.includes('has_phone'),
+        hasNotes: store.filterContactTypes.includes('has_notes'),
+        localLabelIds: store.filterLocalLabelIds,
         sortBy: store.sortBy,
         sortDir: store.sortDir,
         limit: 100000,
@@ -577,7 +588,7 @@ export default function CRMPage() {
   const filteredContacts = (() => {
     let result = store.contacts;
 
-    // Filter by Zalo labels
+    // Filter by Zalo labels (giữ client-side: cần dữ liệu live từ Zalo)
     if (store.filterLabelIds.length > 0) {
       result = result.filter(c => {
         const isGroup = c.contact_type === 'group';
@@ -588,72 +599,8 @@ export default function CRMPage() {
         });
       });
     }
-
-    // Filter by local labels
-    if (store.filterLocalLabelIds.length > 0) {
-      result = result.filter(c => {
-        const threadLIds = localLabelThreadMap[c.contact_id] || [];
-        return store.filterLocalLabelIds.every(lid => threadLIds.includes(lid));
-      });
-    }
-
-    // Client-side filter: has_phone
-    if (store.filterContactTypes.includes('has_phone')) {
-      result = result.filter(c => !!c.phone);
-    }
-
-    // Client-side filter: has_notes
-    if (store.filterContactTypes.includes('has_notes')) {
-      result = result.filter(c => c.note_count > 0);
-    }
-
-    // Client-side filter: gender
-    if (store.filterGender === 'male') {
-      result = result.filter(c => c.gender === 0);
-    } else if (store.filterGender === 'female') {
-      result = result.filter(c => c.gender === 1);
-    } else if (store.filterGender === 'unknown') {
-      result = result.filter(c => c.gender === null || c.gender === undefined);
-    }
-
-    // Client-side filter: birthday
-    if (store.filterBirthday === 'has_birthday') {
-      result = result.filter(c => !!c.birthday);
-    } else if (store.filterBirthday === 'no_birthday') {
-      result = result.filter(c => !c.birthday);
-    } else if (store.filterBirthday === 'today') {
-      const now = new Date();
-      const todayDD = String(now.getDate()).padStart(2, '0');
-      const todayMM = String(now.getMonth() + 1).padStart(2, '0');
-      result = result.filter(c => {
-        if (!c.birthday) return false;
-        const parts = c.birthday.split('/');
-        return parts.length >= 2 && parts[0] === todayDD && parts[1] === todayMM;
-      });
-    } else if (store.filterBirthday === 'this_week') {
-      const now = new Date();
-      // Build set of DD/MM for the next 7 days (including today)
-      const weekDates = new Set<string>();
-      for (let i = 0; i < 7; i++) {
-        const d = new Date(now);
-        d.setDate(d.getDate() + i);
-        weekDates.add(`${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`);
-      }
-      result = result.filter(c => {
-        if (!c.birthday) return false;
-        const parts = c.birthday.split('/');
-        if (parts.length < 2) return false;
-        return weekDates.has(`${parts[0]}/${parts[1]}`);
-      });
-    } else if (store.filterBirthday === 'this_month') {
-      const currentMonth = String(new Date().getMonth() + 1).padStart(2, '0');
-      result = result.filter(c => {
-        if (!c.birthday) return false;
-        // birthday format: DD/MM/YYYY
-        const parts = c.birthday.split('/');
-        return parts.length >= 2 && parts[1] === currentMonth;
-      });
-    }
+    // Các lọc còn lại (local labels, has_phone, has_notes, gender, birthday)
+    // đã chạy ở backend (P1.4) nên tổng/phân trang đúng.
 
     return result;
   })();
@@ -663,7 +610,7 @@ export default function CRMPage() {
       {/* Top bar */}
       <div className="flex items-center gap-3 px-5 py-3 border-b border-gray-700 flex-shrink-0 bg-gray-850">
         <div className="flex bg-gray-800 rounded-lg p-0.5">
-          {(['search', 'contacts', 'groups', 'requests', 'campaigns', 'history', 'scan', 'scan_history', 'scan_stats'] as const).filter(t => {
+          {(['search', 'contacts', 'pool', 'groups', 'requests', 'campaigns', 'history', 'scan', 'scan_history', 'scan_stats'] as const).filter(t => {
             if (t === 'search') return channelCap.supportsCRMSearch;
             if (t === 'requests') return channelCap.supportsFriendRequest;
             if (t === 'campaigns') return channelCap.supportsCampaigns;
@@ -682,6 +629,7 @@ export default function CRMPage() {
               className={`px-4 py-1.5 rounded-md text-xs font-medium flex transition-colors ${store.tab === t ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-gray-200'}`}>
               {t === 'search' ? <><SearchIcon className="w-4 h-4 mr-2" /> Tìm kiếm</>
                 : t === 'contacts' ? <><UserIcon className="w-4 h-4 mr-2" /> Liên hệ{store.totalContacts ? ` (${store.totalContacts})` : ''}</>
+                : t === 'pool' ? <><BriefcaseIcon className="w-4 h-4 mr-2" /> Client Pool</>
                 : t === 'groups' ? (
                   <span className="relative inline-flex items-center gap-1.5">
                     <span className="flex"><UsersIcon className="w-4 h-4 mr-2" /> Nhóm{store.groupCount ? ` (${store.groupCount})` : ''}</span>
@@ -782,6 +730,11 @@ export default function CRMPage() {
                 />
               )}
             </>
+          )}
+
+          {/* ── Client Pool tab ── */}
+          {store.tab === 'pool' && activeAccountId && (
+            <ClientPoolTab zaloId={activeAccountId} />
           )}
 
           {/* ── Campaigns tab ── */}

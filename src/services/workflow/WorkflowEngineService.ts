@@ -23,7 +23,7 @@ import { CHANNEL } from '../../ui/lib/channelHelper';
 export type NodeType =
   | 'trigger.message' | 'trigger.friendRequest' | 'trigger.groupEvent'
   | 'trigger.reaction' | 'trigger.undo' | 'trigger.schedule' | 'trigger.manual'
-  | 'trigger.labelAssigned' | 'trigger.telegramCommand'
+  | 'trigger.labelAssigned' | 'trigger.telegramCommand' | 'trigger.customerInactive'
   | 'zalo.sendMessage' | 'zalo.sendImage' | 'zalo.sendFile' | 'zalo.sendVoice'
   | 'zalo.forwardMessage' | 'zalo.addReaction' | 'zalo.undoMessage'
   | 'zalo.sendTyping'
@@ -242,7 +242,10 @@ class WorkflowEngineService {
       };
       this.workflows.set(wf.id, wf);
       this.unregisterCron(workflowId);
-      if (wf.enabled && this.isRunnableWorkflow(wf)) this.registerCronForWorkflow(wf);
+      if (wf.enabled && this.isRunnableWorkflow(wf)) {
+        this.registerCronForWorkflow(wf);
+        this.registerInactiveForWorkflow(wf);
+      }
       // Sync Telegram pollers when workflow is reloaded
       try {
         const { syncPollers } = require('./TelegramBotPollingService');
@@ -376,7 +379,10 @@ class WorkflowEngineService {
 
   private registerCronJobs(): void {
     for (const wf of this.workflows.values()) {
-      if (wf.enabled && this.isRunnableWorkflow(wf)) this.registerCronForWorkflow(wf);
+      if (wf.enabled && this.isRunnableWorkflow(wf)) {
+        this.registerCronForWorkflow(wf);
+        this.registerInactiveForWorkflow(wf);
+      }
     }
   }
 
@@ -398,8 +404,83 @@ class WorkflowEngineService {
   }
 
   private unregisterCron(workflowId: string): void {
-    const job = this.cronJobs.get(workflowId);
-    if (job) { job.stop(); this.cronJobs.delete(workflowId); }
+    for (const key of [workflowId, `${workflowId}:inactive`]) {
+      const job = this.cronJobs.get(key);
+      if (job) { job.stop(); this.cronJobs.delete(key); }
+    }
+  }
+
+  // ── Trigger: khách im lặng N ngày — cron quét rồi kích hoạt từng liên hệ ──
+  private registerInactiveForWorkflow(wf: Workflow): void {
+    if (!this.isRunnableWorkflow(wf)) return;
+    const node = wf.nodes.find(n => n.type === 'trigger.customerInactive');
+    if (!node) return;
+    const expr: string = node.config.cronExpression || '0 8 * * *';
+    if (!cron.validate(expr)) return;
+    const tz = node.config.timezone || 'Asia/Ho_Chi_Minh';
+    const task = cron.schedule(expr, () => {
+      this.scanInactiveContacts(wf, node.config || {}).catch(err => {
+        Logger.error(`[WorkflowEngine] Inactive-scan error in "${wf.name}": ${err.message}`);
+      });
+    }, { timezone: tz });
+    this.cronJobs.set(`${wf.id}:inactive`, task);
+    Logger.log(`[WorkflowEngine] Inactive-scan registered for "${wf.name}" - ${expr}`);
+  }
+
+  private async scanInactiveContacts(wf: Workflow, cfg: Record<string, any>): Promise<void> {
+    const daysSilent = Number(cfg.daysSilent || 30);
+    if (!daysSilent || daysSilent <= 0) return;
+    const maxPerRun = Math.min(Math.max(Number(cfg.maxPerRun || 50), 1), 500);
+    const labelIds: number[] = Array.isArray(cfg.labelIds)
+      ? cfg.labelIds.map((x: any) => Number(String(x).includes(':') ? String(x).split(':').pop() : x)).filter((n: number) => Number.isFinite(n))
+      : [];
+    // Nick quét: pageIds của workflow, hoặc mọi nick trong DB
+    let ownerIds: string[] = Array.isArray(wf.pageIds) && wf.pageIds.length > 0 ? wf.pageIds : [];
+    if (ownerIds.length === 0) {
+      try {
+        ownerIds = DatabaseService.getInstance().getAccounts().map((a: any) => a.zalo_id).filter(Boolean);
+      } catch { ownerIds = []; }
+    }
+    const db = DatabaseService.getInstance();
+    // Nhãn Local của từng nick (lọc sau khi quét)
+    const labelMap = new Map<string, Set<string>>();
+    if (labelIds.length > 0) {
+      for (const ownerId of ownerIds) {
+        try {
+          const rows = db.query<any>(`SELECT thread_id FROM local_label_threads WHERE owner_zalo_id=? AND label_id IN (${labelIds.map(() => '?').join(',')})`, [ownerId, ...labelIds]);
+          labelMap.set(ownerId, new Set(rows.map((r: any) => String(r.thread_id))));
+        } catch { labelMap.set(ownerId, new Set()); }
+      }
+    }
+    let fired = 0;
+    for (const ownerId of ownerIds) {
+      if (fired >= maxPerRun) break;
+      let contacts: any[] = [];
+      try { contacts = db.getSilentContacts(ownerId, daysSilent, maxPerRun - fired); } catch { continue; }
+      for (const c of contacts) {
+        if (fired >= maxPerRun) break;
+        if (labelIds.length > 0) {
+          const tids = labelMap.get(ownerId);
+          if (!tids || (!tids.has(String(c.contact_id)) && !tids.has(`g${c.contact_id}`))) continue;
+        }
+        const days = Math.floor((Date.now() - Number(c.last_message_time || 0)) / 86400000);
+        fired++;
+        try {
+          await this.executeWorkflow(wf, {
+            zaloId: ownerId,
+            contactId: c.contact_id,
+            threadId: c.contact_id,
+            threadType: 0,
+            displayName: c.display_name || '',
+            phone: c.phone || '',
+            daysSilent: days,
+          }, 'trigger.customerInactive');
+        } catch (err: any) {
+          Logger.error(`[WorkflowEngine] Inactive run failed for ${c.contact_id}: ${err.message}`);
+        }
+      }
+    }
+    if (fired > 0) Logger.log(`[WorkflowEngine] Inactive-scan "${wf.name}": fired ${fired}`);
   }
 
   // ─── Trigger matching ─────────────────────────────────────────────────────
@@ -660,6 +741,12 @@ class WorkflowEngineService {
           if (!String(data.labelText || '').toLowerCase().includes(needle)) return false;
         }
       }
+    }
+
+    if (triggerNode.type === 'trigger.customerInactive') {
+      // Quét đã lọc sẵn daysSilent + nhãn; giữ guard an toàn
+      const need = Number(cfg.daysSilent || 0);
+      if (need > 0 && Number(data.daysSilent || 0) < need) return false;
     }
 
     if (triggerNode.type === 'trigger.payment') {
@@ -1055,6 +1142,17 @@ class WorkflowEngineService {
         action:      data.action || 'assigned',   // 'assigned' | 'removed'
       };
     }
+    if (triggerType === 'trigger.customerInactive') {
+      return {
+        contactId:   data.contactId || '',
+        threadId:    data.threadId || data.contactId || '',
+        threadType:  0,
+        displayName: data.displayName || '',
+        phone:       data.phone || '',
+        daysSilent:  Number(data.daysSilent || 0),
+        zaloId:      data.zaloId || '',
+      };
+    }
     if (triggerType === 'trigger.payment' || triggerType === 'integration:payment') {
       const tx = data.transaction || data;
       return {
@@ -1174,6 +1272,7 @@ class WorkflowEngineService {
       case 'trigger.reaction':
       case 'trigger.undo':
       case 'trigger.schedule':
+      case 'trigger.customerInactive':
       case 'trigger.manual':
       case 'trigger.labelAssigned':
       case 'trigger.webhook':

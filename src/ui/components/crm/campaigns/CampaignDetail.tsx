@@ -82,6 +82,24 @@ export default function CampaignDetail({ campaign, zaloId, channel, allLabels, l
     }
   }, [campaign.id, contacts.length, loadContacts]);
 
+  const [retrying, setRetrying] = useState(false);
+  const handleRetryFailed = useCallback(async () => {
+    const n = campaign.failed_count || 0;
+    if (!n || retrying) return;
+    if (!confirm(`Gửi lại ${n} liên hệ bị lỗi?`)) return;
+    setRetrying(true);
+    try {
+      const res = await DataAccessor.retryFailedContacts({ campaignId: campaign.id });
+      if (res?.success) {
+        // Tự chạy tiếp nếu chiến dịch đang dừng/xong lỗi
+        if (campaign.status !== 'active') await onStatusChange(campaign.id, 'active');
+        await loadContacts();
+      }
+    } finally {
+      setRetrying(false);
+    }
+  }, [campaign.id, campaign.failed_count, campaign.status, retrying, loadContacts, onStatusChange]);
+
   // ── Real-time updates từ queue ────────────────────────────────────────────
   useEffect(() => {
     const unsubUpdate = ipc.on?.('crm:queueUpdate', (data: any) => {
@@ -147,6 +165,13 @@ export default function CampaignDetail({ campaign, zaloId, channel, allLabels, l
             {campaign.status === 'paused' && (
               <button onClick={() => onStatusChange(campaign.id, 'active')}
                 className="text-xs px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white">▶ Tiếp tục</button>
+            )}
+            {(campaign.failed_count || 0) > 0 && (
+              <button onClick={handleRetryFailed} disabled={retrying}
+                title="Chuyển tin lỗi về chờ gửi lại"
+                className="text-xs px-3 py-1.5 rounded-lg bg-red-600/80 hover:bg-red-600 text-white disabled:opacity-50 transition-colors">
+                ↻ Thử lại {campaign.failed_count} lỗi
+              </button>
             )}
           </div>
         </div>

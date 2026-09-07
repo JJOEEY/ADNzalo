@@ -860,6 +860,38 @@ class DatabaseService {
         `);
         try { this.exec(`ALTER TABLE crm_send_log ADD COLUMN channel TEXT NOT NULL DEFAULT 'zalo'`); } catch {}
 
+        // ── Client Pool: data → khách hàng (stage bán hàng/CSKH, gán NV, giá trị) ──
+        this.exec(`
+            CREATE TABLE IF NOT EXISTS client_pool (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_zalo_id TEXT NOT NULL,
+                contact_id TEXT NOT NULL,
+                contact_type TEXT NOT NULL DEFAULT 'user',
+                display_name TEXT NOT NULL DEFAULT '',
+                stage TEXT NOT NULL DEFAULT 'new',
+                owner_employee TEXT NOT NULL DEFAULT '',
+                deal_value REAL NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(owner_zalo_id, contact_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_client_pool_owner ON client_pool(owner_zalo_id, stage, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_client_pool_emp ON client_pool(owner_employee);
+        `);
+        this.exec(`
+            CREATE TABLE IF NOT EXISTS client_stage_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_zalo_id TEXT NOT NULL,
+                contact_id TEXT NOT NULL,
+                from_stage TEXT NOT NULL DEFAULT '',
+                to_stage TEXT NOT NULL DEFAULT '',
+                changed_by TEXT NOT NULL DEFAULT '',
+                note TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_client_stage_hist ON client_stage_history(owner_zalo_id, contact_id, created_at DESC);
+        `);
+
         // ─── Local Labels (custom per-app labels, independent from Zalo) ────────
         this.exec(`
             CREATE TABLE IF NOT EXISTS local_labels (
@@ -874,6 +906,8 @@ class DatabaseService {
             );
             CREATE INDEX IF NOT EXISTS idx_local_labels_name ON local_labels(name);
         `);
+        // Link 2 chiều với nhãn Zalo (P4.1): mirror đổi tên/màu theo Zalo, unlink khi Zalo xóa
+        try { this.exec(`ALTER TABLE local_labels ADD COLUMN zalo_label_id INTEGER NULL`); } catch {}
 
         this.exec(`
             CREATE TABLE IF NOT EXISTS local_label_threads (
@@ -5254,6 +5288,8 @@ class DatabaseService {
         isActive?: number;
         sortOrder?: number;
         shortcut?: string;
+        /** Link tới nhãn Zalo gốc (P4.1). undefined = giữ nguyên, null = gỡ link */
+        zaloLabelId?: number | null;
     }): number {
         if (!this.initialized) return -1;
 
@@ -5282,12 +5318,15 @@ class DatabaseService {
             }
 
             if (label.id) {
+                // zaloLabelId: chỉ chạm tới khi caller truyền rõ (undefined = giữ link cũ, null = gỡ link)
+                const linkProvided = label && typeof label.zaloLabelId !== 'undefined';
                 this.run(
                     `UPDATE local_labels
                      SET name=?, color=?, text_color=?, emoji=?, page_ids=?,
                          is_active=COALESCE(?,is_active),
                          sort_order=COALESCE(?,sort_order),
                          shortcut=?,
+                         ${linkProvided ? 'zalo_label_id=?,' : ''}
                          updated_at=?
                      WHERE id=?`,
                     [
@@ -5299,6 +5338,7 @@ class DatabaseService {
                         label.isActive ?? null,
                         label.sortOrder ?? null,
                         shortcut,
+                        ...(linkProvided ? [label.zaloLabelId] : []),
                         now,
                         label.id
                     ]
@@ -5307,8 +5347,8 @@ class DatabaseService {
             } else {
                 this.run(
                     `INSERT INTO local_labels
-                     (name, color, text_color, emoji, page_ids, is_active, sort_order, shortcut, created_at, updated_at)
-                     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+                     (name, color, text_color, emoji, page_ids, is_active, sort_order, shortcut, zalo_label_id, created_at, updated_at)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
                     [
                         label.name,
                         label.color,
@@ -5318,6 +5358,7 @@ class DatabaseService {
                         label.isActive ?? 1,
                         label.sortOrder ?? 0,
                         shortcut,
+                        label.zaloLabelId ?? null,
                         now,
                         now
                     ]
@@ -5479,6 +5520,145 @@ class DatabaseService {
         if (!this.initialized) return;
         try { this.run(`DELETE FROM crm_notes WHERE id=? AND owner_zalo_id=?`, [noteId, ownerZaloId]); }
         catch (err: any) { Logger.error(`[DB] deleteCRMNote: ${err.message}`); }
+    }
+
+    // ── Client Pool: data → khách hàng (stage, gán NV, giá trị) ──────────────
+    public getClientPool(ownerZaloId: string, opts: {
+        stage?: string; ownerEmployee?: string; search?: string;
+        silentDays?: number; limit?: number; offset?: number;
+    } = {}): { entries: any[]; total: number } {
+        if (!this.initialized) return { entries: [], total: 0 };
+        try {
+            const conds = ['p.owner_zalo_id=?'];
+            const params: any[] = [ownerZaloId];
+            if (opts.stage) { conds.push('p.stage=?'); params.push(opts.stage); }
+            if (opts.ownerEmployee !== undefined && opts.ownerEmployee !== '') {
+                conds.push('p.owner_employee=?'); params.push(opts.ownerEmployee);
+            }
+            if (opts.search) {
+                conds.push(`(p.display_name LIKE ? OR p.contact_id LIKE ? OR COALESCE(c.phone,f.phone,'') LIKE ?)`);
+                const like = `%${opts.search}%`;
+                params.push(like, like, like);
+            }
+            if (opts.silentDays && opts.silentDays > 0) {
+                conds.push('COALESCE(c.last_message_time,0) < ?');
+                params.push(Date.now() - opts.silentDays * 86400 * 1000);
+            }
+            const where = `WHERE ${conds.join(' AND ')}`;
+            const join = `FROM client_pool p
+                LEFT JOIN contacts c ON c.owner_zalo_id=p.owner_zalo_id AND c.contact_id=p.contact_id
+                LEFT JOIN friends f ON f.owner_zalo_id=p.owner_zalo_id AND f.user_id=p.contact_id`;
+            const totalRow = this.query<any>(`SELECT COUNT(*) AS n ${join} ${where}`, params)[0];
+            const limit = Math.min(Math.max(opts.limit ?? 200, 1), 2000);
+            const offset = Math.max(opts.offset ?? 0, 0);
+            const entries = this.query<any>(
+                `SELECT p.*, COALESCE(c.phone,f.phone,'') AS phone,
+                    COALESCE(c.last_message_time,0) AS last_message_time,
+                    COALESCE(NULLIF(c.display_name,''),NULLIF(f.display_name,''),p.display_name) AS resolved_name
+                 ${join} ${where} ORDER BY p.updated_at DESC LIMIT ? OFFSET ?`,
+                [...params, limit, offset],
+            );
+            return { entries, total: Number(totalRow?.n || 0) };
+        } catch (err: any) { Logger.error(`[DB] getClientPool: ${err.message}`); return { entries: [], total: 0 }; }
+    }
+
+    public upsertClientPoolEntry(e: {
+        owner_zalo_id: string; contact_id: string; contact_type?: string; display_name?: string;
+        stage?: string; owner_employee?: string; deal_value?: number; changed_by?: string;
+    }): number {
+        if (!this.initialized || !e.owner_zalo_id || !e.contact_id) return 0;
+        try {
+            const now = Date.now();
+            const existing = this.query<any>(
+                `SELECT id, stage FROM client_pool WHERE owner_zalo_id=? AND contact_id=?`,
+                [e.owner_zalo_id, e.contact_id],
+            )[0];
+            if (!existing) {
+                const id = this.runInsert(
+                    `INSERT INTO client_pool (owner_zalo_id, contact_id, contact_type, display_name, stage, owner_employee, deal_value, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+                    [e.owner_zalo_id, e.contact_id, e.contact_type || 'user', e.display_name || '',
+                     e.stage || 'new', e.owner_employee || '', Number(e.deal_value || 0), now, now],
+                );
+                if ((e.stage || 'new') !== 'new') {
+                    this.run(
+                        `INSERT INTO client_stage_history (owner_zalo_id, contact_id, from_stage, to_stage, changed_by, note, created_at) VALUES (?,?,?,?,?,?,?)`,
+                        [e.owner_zalo_id, e.contact_id, 'new', e.stage, e.changed_by || '', '', now],
+                    );
+                }
+                return id;
+            }
+            const sets = ['updated_at=?'];
+            const vals: any[] = [now];
+            if (e.display_name) { sets.push('display_name=?'); vals.push(e.display_name); }
+            if (e.contact_type) { sets.push('contact_type=?'); vals.push(e.contact_type); }
+            if (e.owner_employee !== undefined) { sets.push('owner_employee=?'); vals.push(e.owner_employee); }
+            if (e.deal_value !== undefined) { sets.push('deal_value=?'); vals.push(Number(e.deal_value)); }
+            if (e.stage) { sets.push('stage=?'); vals.push(e.stage); }
+            vals.push(existing.id);
+            this.run(`UPDATE client_pool SET ${sets.join(',')} WHERE id=?`, vals);
+            if (e.stage && e.stage !== existing.stage) {
+                this.run(
+                    `INSERT INTO client_stage_history (owner_zalo_id, contact_id, from_stage, to_stage, changed_by, note, created_at) VALUES (?,?,?,?,?,?,?)`,
+                    [e.owner_zalo_id, e.contact_id, existing.stage, e.stage, e.changed_by || '', '', now],
+                );
+            }
+            return existing.id;
+        } catch (err: any) { Logger.error(`[DB] upsertClientPoolEntry: ${err.message}`); return 0; }
+    }
+
+    public setClientStage(ownerZaloId: string, contactId: string, toStage: string, changedBy = '', note = ''): boolean {
+        if (!this.initialized) return false;
+        try {
+            return this.transaction(() => {
+                const row = this.query<any>(
+                    `SELECT id, stage FROM client_pool WHERE owner_zalo_id=? AND contact_id=?`,
+                    [ownerZaloId, contactId],
+                )[0];
+                if (!row || row.stage === toStage) return false;
+                const now = Date.now();
+                this.run(`UPDATE client_pool SET stage=?, updated_at=? WHERE id=?`, [toStage, now, row.id]);
+                this.run(
+                    `INSERT INTO client_stage_history (owner_zalo_id, contact_id, from_stage, to_stage, changed_by, note, created_at) VALUES (?,?,?,?,?,?,?)`,
+                    [ownerZaloId, contactId, row.stage, toStage, changedBy, note, now],
+                );
+                return true;
+            });
+        } catch (err: any) { Logger.error(`[DB] setClientStage: ${err.message}`); return false; }
+    }
+
+    public removeClientPoolEntry(ownerZaloId: string, contactId: string): void {
+        if (!this.initialized) return;
+        try { this.run(`DELETE FROM client_pool WHERE owner_zalo_id=? AND contact_id=?`, [ownerZaloId, contactId]); }
+        catch (err: any) { Logger.error(`[DB] removeClientPoolEntry: ${err.message}`); }
+    }
+
+    public getClientPoolStats(ownerZaloId: string): { total: number; byStage: Record<string, number>; closedValue: number } {
+        if (!this.initialized) return { total: 0, byStage: {}, closedValue: 0 };
+        try {
+            const rows = this.query<any>(
+                `SELECT stage, COUNT(*) AS n, COALESCE(SUM(deal_value),0) AS v FROM client_pool WHERE owner_zalo_id=? GROUP BY stage`,
+                [ownerZaloId],
+            );
+            const byStage: Record<string, number> = {};
+            let total = 0;
+            let closedValue = 0;
+            for (const r of rows) {
+                byStage[r.stage] = Number(r.n);
+                total += Number(r.n);
+                if (r.stage === 'closed') closedValue = Number(r.v);
+            }
+            return { total, byStage, closedValue };
+        } catch (err: any) { Logger.error(`[DB] getClientPoolStats: ${err.message}`); return { total: 0, byStage: {}, closedValue: 0 }; }
+    }
+
+    public getClientStageHistory(ownerZaloId: string, contactId: string, limit = 50): any[] {
+        if (!this.initialized) return [];
+        try {
+            return this.query<any>(
+                `SELECT * FROM client_stage_history WHERE owner_zalo_id=? AND contact_id=? ORDER BY created_at DESC LIMIT ?`,
+                [ownerZaloId, contactId, limit],
+            );
+        } catch (err: any) { Logger.error(`[DB] getClientStageHistory: ${err.message}`); return []; }
     }
 
     /** Campaigns */
@@ -5663,6 +5843,21 @@ class DatabaseService {
         } catch (err: any) { Logger.error(`[DB] updateCampaignContactId: ${err.message}`); }
     }
 
+    /** Chuyển toàn bộ contact lỗi về pending để gửi lại (P4.2) */
+    public retryFailedCampaignContacts(campaignId: number): number {
+        if (!this.initialized) return 0;
+        try {
+            const row = this.queryOne<any>(
+                `SELECT COUNT(*) AS n FROM crm_campaign_contacts WHERE campaign_id=? AND status='failed'`, [campaignId],
+            );
+            this.run(
+                `UPDATE crm_campaign_contacts SET status='pending', retry_count=0, error='', sent_at=0 WHERE campaign_id=? AND status='failed'`,
+                [campaignId],
+            );
+            return Number(row?.n || 0);
+        } catch (err: any) { Logger.error(`[DB] retryFailedCampaignContacts: ${err.message}`); return 0; }
+    }
+
     /** Lấy item tiếp theo cần gửi cho account này */
     public getNextPendingCampaignContact(ownerZaloId: string): CRMCampaignContact | null {
         if (!this.initialized) return null;
@@ -5787,10 +5982,17 @@ class DatabaseService {
         contactTypes?: ('friend' | 'group' | 'non_friend')[];
         sortBy?: 'name' | 'last_message'; sortDir?: 'asc' | 'desc';
         limit?: number; offset?: number;
+        // Mở rộng lọc backend (P1.4): chạy trước phân trang để đúng tổng/số trang
+        gender?: 'all' | 'male' | 'female' | 'unknown';
+        birthday?: 'all' | 'has_birthday' | 'no_birthday' | 'today' | 'this_week' | 'this_month';
+        hasPhone?: boolean; hasNotes?: boolean;
+        localLabelIds?: number[];
+        silentDays?: number;
     } = {}): { contacts: any[]; total: number } {
         if (!this.initialized) return { contacts: [], total: 0 };
         try {
-            const { search, isFriendOnly, contactType = 'all', contactTypes, sortBy = 'name', sortDir = 'asc', limit = 50, offset = 0 } = opts;
+            const { search, isFriendOnly, contactType = 'all', contactTypes, sortBy = 'name', sortDir = 'asc', limit = 50, offset = 0,
+                gender = 'all', birthday = 'all', hasPhone = false, hasNotes = false, localLabelIds = [], silentDays = 0 } = opts;
 
             let all: any[] = [];
 
@@ -5883,6 +6085,80 @@ class DatabaseService {
                 );
             }
 
+            // ── Mở rộng lọc backend (P1.4): trước sort/phân trang ──
+            if (hasPhone) all = all.filter((c: any) => !!c.phone);
+            if (gender === 'male') all = all.filter((c: any) => c.gender === 0);
+            else if (gender === 'female') all = all.filter((c: any) => c.gender === 1);
+            else if (gender === 'unknown') all = all.filter((c: any) => c.gender === null || c.gender === undefined);
+            if (birthday && birthday !== 'all') {
+                const now = new Date();
+                const pad = (n: number) => String(n).padStart(2, '0');
+                const todayDDMM = `${pad(now.getDate())}/${pad(now.getMonth() + 1)}`;
+                if (birthday === 'has_birthday') all = all.filter((c: any) => !!c.birthday);
+                else if (birthday === 'no_birthday') all = all.filter((c: any) => !c.birthday);
+                else {
+                    const wanted = new Set<string>();
+                    if (birthday === 'today') wanted.add(todayDDMM);
+                    else if (birthday === 'this_month') {
+                        const mm = pad(now.getMonth() + 1);
+                        all = all.filter((c: any) => {
+                            if (!c.birthday) return false;
+                            const parts = String(c.birthday).split('/');
+                            return parts.length >= 2 && parts[1] === mm;
+                        });
+                    } else if (birthday === 'this_week') {
+                        for (let i = 0; i < 7; i++) {
+                            const d = new Date(now);
+                            d.setDate(d.getDate() + i);
+                            wanted.add(`${pad(d.getDate())}/${pad(d.getMonth() + 1)}`);
+                        }
+                    }
+                    if (birthday !== 'this_month') {
+                        all = all.filter((c: any) => {
+                            if (!c.birthday) return false;
+                            const parts = String(c.birthday).split('/');
+                            if (parts.length < 2) return false;
+                            return wanted.has(`${parts[0]}/${parts[1]}`);
+                        });
+                    }
+                }
+            }
+            if (hasNotes) {
+                const ids = all.map((c: any) => c.contact_id);
+                const withNotes = new Set<string>();
+                for (let i = 0; i < ids.length; i += 500) {
+                    const chunk = ids.slice(i, i + 500);
+                    if (!chunk.length) break;
+                    const placeholders = chunk.map(() => '?').join(',');
+                    this.query<any>(
+                        `SELECT DISTINCT contact_id FROM crm_notes WHERE owner_zalo_id=? AND contact_id IN (${placeholders})`,
+                        [ownerZaloId, ...chunk],
+                    ).forEach((r: any) => withNotes.add(r.contact_id));
+                }
+                all = all.filter((c: any) => withNotes.has(c.contact_id));
+            }
+            if (localLabelIds && localLabelIds.length > 0) {
+                const rows = this.query<any>(
+                    `SELECT thread_id, label_id FROM local_label_threads WHERE owner_zalo_id=?`, [ownerZaloId],
+                );
+                const byThread = new Map<string, Set<number>>();
+                for (const r of rows) {
+                    const tid = String(r.thread_id);
+                    if (!byThread.has(tid)) byThread.set(tid, new Set());
+                    byThread.get(tid)!.add(Number(r.label_id));
+                }
+                const wanted = localLabelIds.map(Number);
+                all = all.filter((c: any) => {
+                    // Nhóm match theo id trần hoặc prefix g (giống UI)
+                    const tids = [String(c.contact_id), `g${c.contact_id}`];
+                    return wanted.every((lid) => tids.some((t) => byThread.get(t)?.has(lid)));
+                });
+            }
+            if (silentDays && silentDays > 0) {
+                const cutoff = Date.now() - silentDays * 86400 * 1000;
+                all = all.filter((c: any) => Number(c.last_message_time || 0) < cutoff);
+            }
+
             // Sort
             all.sort((a, b) => {
                 let va: any, vb: any;
@@ -5918,6 +6194,34 @@ class DatabaseService {
 
             return { contacts, total };
         } catch (err: any) { Logger.error(`[DB] getCRMContacts: ${err.message}`); return { contacts: [], total: 0 }; }
+    }
+
+    /** Liên hệ 1:1 im lặng quá N ngày (bỏ nhóm) — dùng cho trigger chăm sóc lại */
+    public getSilentContacts(ownerZaloId: string, daysSilent: number, limit = 50): any[] {
+        if (!this.initialized || !daysSilent || daysSilent <= 0) return [];
+        try {
+            const cutoff = Date.now() - daysSilent * 86400 * 1000;
+            const lim = Math.min(Math.max(limit || 50, 1), 500);
+            return this.query<any>(
+                `SELECT f.user_id AS contact_id,
+                    COALESCE(c.display_name, f.display_name, '') AS display_name,
+                    COALESCE(c.avatar_url, f.avatar, '') AS avatar,
+                    COALESCE(c.phone, f.phone, '') AS phone,
+                    COALESCE(c.last_message_time, 0) AS last_message_time
+                 FROM friends f
+                 LEFT JOIN contacts c ON c.owner_zalo_id=f.owner_zalo_id AND c.contact_id=f.user_id
+                 WHERE f.owner_zalo_id=? AND COALESCE(c.last_message_time,0) < ?
+                 UNION
+                 SELECT c.contact_id, c.display_name, c.avatar_url, COALESCE(c.phone,''),
+                    COALESCE(c.last_message_time,0)
+                 FROM contacts c
+                 WHERE c.owner_zalo_id=? AND COALESCE(c.contact_type,'user') != 'group'
+                   AND COALESCE(c.last_message_time,0) < ?
+                   AND NOT EXISTS (SELECT 1 FROM friends f2 WHERE f2.owner_zalo_id=c.owner_zalo_id AND f2.user_id=c.contact_id)
+                 ORDER BY last_message_time ASC LIMIT ?`,
+                [ownerZaloId, cutoff, ownerZaloId, cutoff, lim],
+            );
+        } catch (err: any) { Logger.error(`[DB] getSilentContacts: ${err.message}`); return []; }
     }
 
     /** Activity stats for a given time window - used by CRM Dashboard */

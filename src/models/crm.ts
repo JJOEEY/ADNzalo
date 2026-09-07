@@ -97,3 +97,45 @@ export interface CRMContactTag {
     contact_id: string;
     tag_id: number;
 }
+
+// ── Client Pool (data → khách hàng, theo dõi bán hàng/CSKH) ──────────────
+// Chứng khoán: stage = trạng thái chăm sóc/mở TK; deal_value = NAV/khớp lệnh.
+
+/** Giai đoạn client pool: mới → đang tư vấn → chốt → chăm lại / mất */
+export type ClientStage = 'new' | 'consulting' | 'closed' | 'nurturing' | 'lost';
+
+export const CLIENT_STAGES: { value: ClientStage; label: string }[] = [
+    { value: 'new',        label: 'Mới' },
+    { value: 'consulting', label: 'Đang tư vấn' },
+    { value: 'closed',     label: 'Chốt sale' },
+    { value: 'nurturing',  label: 'Chăm lại' },
+    { value: 'lost',       label: 'Mất' },
+];
+
+export interface ClientPoolEntry {
+    id?: number;
+    owner_zalo_id: string;
+    contact_id: string;
+    contact_type?: string;
+    display_name?: string;
+    stage: ClientStage;
+    /** employee_id nhân viên phụ trách ('' = chưa gán) */
+    owner_employee?: string;
+    deal_value?: number;
+    created_at?: number;
+    updated_at?: number;
+    // Join sẵn để hiển thị (không lưu DB)
+    phone?: string;
+    last_message_time?: number;
+}
+
+export interface ClientStageHistory {
+    id?: number;
+    owner_zalo_id: string;
+    contact_id: string;
+    from_stage: string;
+    to_stage: string;
+    changed_by?: string;
+    note?: string;
+    created_at?: number;
+}

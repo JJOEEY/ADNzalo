@@ -353,7 +353,7 @@ const CONFIG_SCHEMA: Record<string, Field[]> = {
       desc: 'Đặt lịch để workflow tự động chạy theo thời gian. Chọn mẫu có sẵn hoặc nhập tùy chỉnh.',
     },
     {
-      key: 'timezone', label: 'Múi giờ', type: 'select',
+      key: 'timezone', label: 'Múi giờ?', type: 'select',
       desc: 'Múi giờ dùng để tính thời gian chạy.',
       options: [
         { value: 'Asia/Ho_Chi_Minh', label: 'Việt Nam (UTC+7)' },
@@ -361,6 +361,40 @@ const CONFIG_SCHEMA: Record<string, Field[]> = {
         { value: 'Asia/Singapore',   label: 'Singapore (UTC+8)' },
         { value: 'UTC',              label: 'UTC (chuẩn quốc tế)' },
       ],
+      advanced: true,
+    },
+  ],
+  'trigger.customerInactive': [
+    {
+      key: 'daysSilent', label: 'Im lặng quá (ngày)', type: 'number',
+      placeholder: '30',
+      desc: 'Kích hoạt cho từng liên hệ không có tin nhắn nào trong suốt số ngày này.',
+    },
+    {
+      key: 'cronExpression', label: 'Lịch quét', type: 'cron',
+      placeholder: '0 8 * * *',
+      desc: 'Bao lâu quét một lần để tìm khách im lặng (mặc định 8h sáng mỗi ngày).',
+    },
+    {
+      key: 'timezone', label: 'Múi giờ?', type: 'select',
+      desc: 'Múi giờ dùng để tính lịch quét.',
+      options: [
+        { value: 'Asia/Ho_Chi_Minh', label: 'Việt Nam (UTC+7)' },
+        { value: 'Asia/Bangkok',     label: 'Bangkok (UTC+7)' },
+        { value: 'Asia/Singapore',   label: 'Singapore (UTC+8)' },
+        { value: 'UTC',              label: 'UTC (chuẩn quốc tế)' },
+      ],
+      advanced: true,
+    },
+    {
+      key: 'labelIds', label: 'Chỉ nhãn Local này (tùy chọn)', type: 'label-picker', labelMode: 'multi',
+      desc: 'Để trống = quét mọi liên hệ. Dùng biến {{ $trigger.contactId }}, {{ $trigger.displayName }}, {{ $trigger.daysSilent }} ở các node sau.',
+      templateVars: ['$trigger.contactId', '$trigger.displayName', '$trigger.phone', '$trigger.daysSilent', '$trigger.threadId'],
+    },
+    {
+      key: 'maxPerRun', label: 'Tối đa mỗi lần quét', type: 'number',
+      placeholder: '50',
+      desc: 'Giới hạn số liên hệ kích hoạt mỗi lần quét để tránh gửi ồ ạt.',
       advanced: true,
     },
   ],

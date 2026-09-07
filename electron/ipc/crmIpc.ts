@@ -50,6 +50,56 @@ export function registerCRMIpc(): void {
         } catch (e: any) { return { success: false, error: e.message }; }
     });
 
+    // ─── Client Pool: data → khách hàng ───
+    ipcMain.handle('crm:getClientPool', async (_e, { zaloId, opts }: { zaloId: string; opts?: any }) => {
+        try {
+            if (isEmployeeMode()) return { success: true, entries: [], total: 0 };
+            return { success: true, ...DatabaseService.getInstance().getClientPool(zaloId, opts || {}) };
+        }
+        catch (e: any) { return { success: false, error: e.message, entries: [], total: 0 }; }
+    });
+
+    ipcMain.handle('crm:saveClientPool', async (_e, { zaloId, entry }: { zaloId: string; entry: any }) => {
+        try {
+            if (isEmployeeMode()) proxyToBoss('crm:saveClientPool', { zaloId, entry });
+            const id = DatabaseService.getInstance().upsertClientPoolEntry({ ...entry, owner_zalo_id: zaloId });
+            DatabaseService.getInstance().save();
+            EventBroadcaster.emit('crm:clientPoolChanged', { action: 'save', ownerZaloId: zaloId, id, entry });
+            proxyToBoss('crm:saveClientPool', { zaloId, entry });
+            return { success: true, id };
+        } catch (e: any) { return { success: false, error: e.message }; }
+    });
+
+    ipcMain.handle('crm:setClientStage', async (_e, { zaloId, contactId, stage, changedBy, note }: { zaloId: string; contactId: string; stage: string; changedBy?: string; note?: string }) => {
+        try {
+            if (isEmployeeMode()) proxyToBoss('crm:setClientStage', { zaloId, contactId, stage, changedBy, note });
+            const changed = DatabaseService.getInstance().setClientStage(zaloId, contactId, stage, changedBy || '', note || '');
+            DatabaseService.getInstance().save();
+            EventBroadcaster.emit('crm:clientPoolChanged', { action: 'stage', ownerZaloId: zaloId, contactId, stage });
+            proxyToBoss('crm:setClientStage', { zaloId, contactId, stage, changedBy, note });
+            return { success: true, changed };
+        } catch (e: any) { return { success: false, error: e.message }; }
+    });
+
+    ipcMain.handle('crm:removeClientPool', async (_e, { zaloId, contactId }: { zaloId: string; contactId: string }) => {
+        try {
+            if (isEmployeeMode()) proxyToBoss('crm:removeClientPool', { zaloId, contactId });
+            DatabaseService.getInstance().removeClientPoolEntry(zaloId, contactId);
+            DatabaseService.getInstance().save();
+            EventBroadcaster.emit('crm:clientPoolChanged', { action: 'remove', ownerZaloId: zaloId, contactId });
+            proxyToBoss('crm:removeClientPool', { zaloId, contactId });
+            return { success: true };
+        } catch (e: any) { return { success: false, error: e.message }; }
+    });
+
+    ipcMain.handle('crm:getClientPoolStats', async (_e, { zaloId }: { zaloId: string }) => {
+        try {
+            if (isEmployeeMode()) return { success: true, total: 0, byStage: {}, closedValue: 0 };
+            return { success: true, ...DatabaseService.getInstance().getClientPoolStats(zaloId) };
+        }
+        catch (e: any) { return { success: false, error: e.message, total: 0, byStage: {}, closedValue: 0 }; }
+    });
+
     // ─── Contacts ──────────────────────────────────────────────────────────
     ipcMain.handle('crm:getContacts', async (_e, { zaloId, opts }: { zaloId: string; opts?: any }) => {
         try {
@@ -194,6 +244,17 @@ export function registerCRMIpc(): void {
         try {
             DatabaseService.getInstance().deleteAllCampaignContacts(campaignId);
             return { success: true };
+        } catch (e: any) { return { success: false, error: e.message }; }
+    });
+
+    ipcMain.handle('crm:retryFailedContacts', async (_e, { campaignId }: { campaignId: number }) => {
+        try {
+            if (isEmployeeMode()) proxyToBoss('crm:retryFailedContacts', { campaignId });
+            const count = DatabaseService.getInstance().retryFailedCampaignContacts(campaignId);
+            DatabaseService.getInstance().save();
+            EventBroadcaster.emit('crm:campaignChanged', { action: 'retry', campaignId, count });
+            proxyToBoss('crm:retryFailedContacts', { campaignId });
+            return { success: true, count };
         } catch (e: any) { return { success: false, error: e.message }; }
     });
 

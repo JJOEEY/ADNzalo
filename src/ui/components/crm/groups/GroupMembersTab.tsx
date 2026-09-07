@@ -131,6 +131,7 @@ function ZaloGroupMembersTab() {
   const { activeAccountId } = useAccountStore();
   const { setGroupCount } = useCRMStore();
   const groupInfoCache = useAppStore(s => s.groupInfoCache);
+  const showNotification = useAppStore(s => s.showNotification);
 
   const [groups, setGroups] = useState<ZaloGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -162,6 +163,7 @@ function ZaloGroupMembersTab() {
   const [localCampaigns, setLocalCampaigns] = useState<any[]>([]);
   const [pickedCampaignId, setPickedCampaignId] = useState<number | null>(null);
   const [addingToCampaign, setAddingToCampaign] = useState(false);
+  const [addingToPool, setAddingToPool] = useState(false);
 
   // ── Add to contacts modal state ─────────────────────────────────────────
   const [showAddToContacts, setShowAddToContacts] = useState(false);
@@ -1033,6 +1035,30 @@ function ZaloGroupMembersTab() {
     }
   }, [activeAccountId, pickedCampaignId, selectedMemberIds, members]);
 
+  // ── Add selected members to Client Pool (stage Mới) ──
+  const handleAddToPool = useCallback(async () => {
+    if (!activeAccountId || selectedMemberIds.size === 0) return;
+    setAddingToPool(true);
+    try {
+      const picked = members.filter((m: any) => selectedMemberIds.has(m.member_id));
+      let added = 0;
+      for (const m of picked) {
+        const res = await DataAccessor.saveClientPool({
+          zaloId: activeAccountId,
+          entry: {
+            contact_id: m.member_id, contact_type: 'user',
+            display_name: m.display_name || m.member_id, stage: 'new',
+          },
+        });
+        if (res?.success) added++;
+      }
+      showNotification?.(`Đã thêm ${added} thành viên vào Client Pool`, 'success');
+      setSelectedMemberIds(new Set());
+    } finally {
+      setAddingToPool(false);
+    }
+  }, [activeAccountId, selectedMemberIds, members, showNotification]);
+
   // ── Effects ───────────────────────────────────────────────────────────────
   useEffect(() => {
     setGroups([]); setMembers([]); setSelectedGroupId(null);
@@ -1714,6 +1740,17 @@ function ZaloGroupMembersTab() {
                     <line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/>
                   </svg>
                   Thêm vào liên hệ
+                </button>
+                <button onClick={handleAddToPool} disabled={selectedMemberIds.size === 0 || addingToPool}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    selectedMemberIds.size === 0
+                      ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                      : 'bg-violet-600 hover:bg-violet-700 text-white'
+                  }`}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+                  </svg>
+                  {addingToPool ? 'Đang thêm...' : 'Thêm vào Client Pool'}
                 </button>
               </div>
             </div>

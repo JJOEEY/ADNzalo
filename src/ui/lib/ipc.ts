@@ -246,10 +246,16 @@ declare global {
         getCampaignContacts: (params: { campaignId: number }) => Promise<{ success: boolean; contacts: any[] }>;
         deleteCampaignContacts: (params: { campaignId: number; contactIds: string[] }) => Promise<{ success: boolean }>;
         deleteAllCampaignContacts: (params: { campaignId: number }) => Promise<{ success: boolean }>;
+        retryFailedContacts: (params: { campaignId: number }) => Promise<{ success: boolean; count?: number; error?: string }>;
         getSendLog: (params: { zaloId: string; opts?: any }) => Promise<{ success: boolean; logs: any[] }>;
         getQueueStatus: (params: { zaloId: string }) => Promise<{ success: boolean; status: any }>;
         getCampaignStats: (params: { zaloId: string; limit?: number }) => Promise<{ success: boolean; stats: any[] }>;
         getActivityStats: (params: { zaloId: string; sinceTs: number; untilTs?: number; }) => Promise<{ success: boolean; conversationCount: number; messageCount: number; sentCount: number; receivedCount: number }>;
+        getClientPool: (params: { zaloId: string; opts?: any }) => Promise<{ success: boolean; entries: any[]; total: number; error?: string }>;
+        saveClientPool: (params: { zaloId: string; entry: any }) => Promise<{ success: boolean; id?: number; error?: string }>;
+        setClientStage: (params: { zaloId: string; contactId: string; stage: string; changedBy?: string; note?: string }) => Promise<{ success: boolean; changed?: boolean; error?: string }>;
+        removeClientPool: (params: { zaloId: string; contactId: string }) => Promise<{ success: boolean; error?: string }>;
+        getClientPoolStats: (params: { zaloId: string }) => Promise<{ success: boolean; total: number; byStage: Record<string, number>; closedValue: number; error?: string }>;
       };
       analytics: {
         dashboardOverview: (params: { zaloId: string }) => Promise<{
@@ -643,6 +649,7 @@ declare global {
         update:        (id: number, proxy: any) => Promise<{ success: boolean; proxy?: any; error?: string }>;
         delete:        (id: number) => Promise<{ success: boolean; error?: string }>;
         setAccount:    (zaloId: string, proxyId: number | null) => Promise<{ success: boolean; error?: string }>;
+        reconnectAccount: (zaloId: string) => Promise<{ success: boolean; error?: string }>;
         getForAccount: (zaloId: string) => Promise<{ success: boolean; proxy?: any; error?: string }>;
         test:          (proxy: any) => Promise<{ success: boolean; ms?: number; status?: number; error?: string }>;
       };

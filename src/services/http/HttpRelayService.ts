@@ -1320,11 +1320,15 @@ class HttpRelayService {
             }
         }
 
-        // ── Điều phối dựa trên URL pattern (chạy trong pinned DB context) ──
+        // ── P5.1: guard phân quyền module cho command của nhân viên ──
         try {
             return this.runOnPinnedDb(() => {
                 const _db = DatabaseService.getInstance();
-                console.log(`[HttpRelayService] 🔄 Handling ${method} ${pathname} — DB: ${_db?.getDbPath?.() || 'unknown'}`);
+                console.log(`[HttpRelayService] → Handling ${method} ${pathname} — DB: ${_db?.getDbPath?.() || 'unknown'}`);
+
+            // Chặn command vượt quyền (GET/đọc vẫn mở, dữ liệu đã giới hạn theo assigned_accounts)
+            const denyReason = this.checkEmployeeModule(method, pathname, employee);
+            if (denyReason) return this.json(res, 403, { success: false, error: denyReason });
 
             // Boot
             if (method === 'GET' && pathname === '/api/boot') {
@@ -1400,6 +1404,12 @@ class HttpRelayService {
             }
             if (method === 'GET' && pathname === '/api/query/crm/campaigns') {
                 return this.json(res, 200, restHandlers.getCRMCampaigns(employee, params));
+            }
+            if (method === 'GET' && pathname === '/api/query/crm/client-pool') {
+                return this.json(res, 200, restHandlers.getClientPool(employee, params));
+            }
+            if (method === 'GET' && pathname === '/api/query/crm/client-pool-stats') {
+                return this.json(res, 200, restHandlers.getClientPoolStats(employee, params));
             }
 
             // Labels (cached — called redundantly after every message, blocks main thread)
@@ -1857,6 +1867,23 @@ class HttpRelayService {
                 return { success: true };
             }
 
+            // ── Client Pool ──
+            if (pathname === '/api/command/crm/client-pool') {
+                const id = db.upsertClientPoolEntry({ ...params.entry, owner_zalo_id: zaloId });
+                EventBroadcaster.emit('crm:clientPoolChanged', { action: 'save', ownerZaloId: zaloId, id });
+                return { success: true, data: { id } };
+            }
+            if (pathname === '/api/command/crm/client-pool/stage') {
+                const changed = db.setClientStage(zaloId, params.contactId, params.stage, params.changedBy || '', params.note || '');
+                EventBroadcaster.emit('crm:clientPoolChanged', { action: 'stage', ownerZaloId: zaloId, contactId: params.contactId, stage: params.stage });
+                return { success: true, data: { changed } };
+            }
+            if (pathname === '/api/command/crm/client-pool/remove') {
+                db.removeClientPoolEntry(zaloId, params.contactId);
+                EventBroadcaster.emit('crm:clientPoolChanged', { action: 'remove', ownerZaloId: zaloId, contactId: params.contactId });
+                return { success: true };
+            }
+
             // ── CRM Campaigns ──
             if (pathname === '/api/command/crm/campaigns') {
                 const id = db.saveCRMCampaign({ ...params.campaign, owner_zalo_id: zaloId });
@@ -2066,8 +2093,7 @@ class HttpRelayService {
             }
 
             // ── CRM — cloneCampaign, updateStatus, addContacts ──
-            if (pathname === '/api/command/crm/campaigns/clone') {
-                const id = db.cloneCRMCampaign(parseInt(params.campaignId) || 0, zaloId, params.includeContacts, params.newName);
+            if (pathname === '/api/command/crm/campaigns/clone') {                const id = db.cloneCRMCampaign(parseInt(params.campaignId) || 0, zaloId, params.includeContacts, params.newName);
                 EventBroadcaster.emit('crm:campaignChanged', { action: 'clone', ownerZaloId: zaloId, campaignId: id });
                 return { success: true, data: { id } };
             }
@@ -2088,10 +2114,14 @@ class HttpRelayService {
                 db.deleteCampaignContacts(parseInt(params.campaignId) || 0, params.contactIds || []);
                 return { success: true };
             }
+            if (pathname === '/api/command/crm/campaigns/retry' && _method === 'POST') {
+                const count = db.retryFailedCampaignContacts(parseInt(params.campaignId) || 0);
+                EventBroadcaster.emit('crm:campaignChanged', { action: 'retry', campaignId: parseInt(params.campaignId) || 0, count });
+                return { success: true, data: { count } };
+            }
             if (pathname === '/api/command/crm/campaigns/contacts' && _method === 'DELETE') {
                 db.deleteCampaignContacts(parseInt(params.campaignId) || 0, params.contactIds || []);
-                return { success: true };
-            }
+                return { success: true };            }
 
             // ── Friends — CRUD ──
             if (pathname === '/api/command/friends/batch') {
@@ -2676,6 +2706,29 @@ class HttpRelayService {
         }
 
         return emp;
+    }
+
+    /**
+     * P5.1: chặn command theo phân quyền module của nhân viên.
+     * Fail-open cho route chưa map để không gãy luồng cũ.
+     */
+    private checkEmployeeModule(method: string, pathname: string, employee: RegisteredEmployee): string | null {
+        try {
+            if (method === 'GET') return null;
+            let module: string | null = null;
+            let bossOnly = false;
+            if (pathname.startsWith('/api/command/crm/')) module = 'crm';
+            else if (pathname.startsWith('/api/command/workflows')) module = 'workflow';
+            else if (pathname.startsWith('/api/command/ai/')) module = 'ai_assistant';
+            else if (pathname === '/api/command/accounts/proxy' || pathname === '/api/command/accounts/phone') bossOnly = true;
+            else if (pathname.startsWith('/api/command/employees') || pathname.startsWith('/api/command/settings')) bossOnly = true;
+            else return null;
+            if (bossOnly) return 'Chỉ Boss mới có quyền thao tác này';
+            const rows = DatabaseService.getInstance().getEmployeePermissions(employee.employee_id) || [];
+            const hit = (rows as any[]).find((p: any) => p.module === module);
+            if (hit && !hit.can_access) return 'Tài khoản nhân viên không có quyền cho thao tác này';
+            return null;
+        } catch { return null; }
     }
 
     // ─── Resolve real auth ────────────────────────────────────────────

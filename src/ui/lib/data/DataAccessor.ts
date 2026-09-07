@@ -360,6 +360,45 @@ export class DataAccessor {
     return window.electronAPI.crm.deleteNote(params);
   }
 
+  // ── Client Pool: data → khách hàng ──
+  static async getClientPool(params: { zaloId: string; opts?: any }) {
+    if (isEmployee()) {
+      const res = await rest().get('/api/query/crm/client-pool', params);
+      return { success: true, entries: res.data?.items || [], total: res.data?.total || 0 };
+    }
+    return window.electronAPI.crm.getClientPool(params);
+  }
+
+  static async saveClientPool(params: { zaloId: string; entry: any }) {
+    if (isEmployee()) {
+      const res = await rest().post('/api/command/crm/client-pool', params);
+      return { success: true, id: res.data?.id };
+    }
+    return window.electronAPI.crm.saveClientPool(params);
+  }
+
+  static async setClientStage(params: { zaloId: string; contactId: string; stage: string; changedBy?: string; note?: string }) {
+    if (isEmployee()) {
+      return rest().post('/api/command/crm/client-pool/stage', params);
+    }
+    return window.electronAPI.crm.setClientStage(params);
+  }
+
+  static async removeClientPool(params: { zaloId: string; contactId: string }) {
+    if (isEmployee()) {
+      return rest().post('/api/command/crm/client-pool/remove', params);
+    }
+    return window.electronAPI.crm.removeClientPool(params);
+  }
+
+  static async getClientPoolStats(params: { zaloId: string }) {
+    if (isEmployee()) {
+      const res = await rest().get('/api/query/crm/client-pool-stats', params);
+      return { success: true, total: res.data?.total || 0, byStage: res.data?.byStage || {}, closedValue: res.data?.closedValue || 0 };
+    }
+    return window.electronAPI.crm.getClientPoolStats(params);
+  }
+
   // ═════════════════════════════════════════════════════════════════
   // CRM CAMPAIGNS
   // ═════════════════════════════════════════════════════════════════
@@ -887,6 +926,14 @@ export class DataAccessor {
       return rest().post('/api/command/crm/campaigns/contacts/delete-all', params);
     }
     return window.electronAPI.crm.deleteAllCampaignContacts(params);
+  }
+
+  static async retryFailedContacts(params: { campaignId: number }) {
+    if (isEmployee()) {
+      const res = await rest().post('/api/command/crm/campaigns/retry', params);
+      return { success: res.success, count: res.data?.count || 0, error: res.error };
+    }
+    return window.electronAPI.crm.retryFailedContacts(params);
   }
 
   static async getSendLog(params: { zaloId: string; opts?: any }) {

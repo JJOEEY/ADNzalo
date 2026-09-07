@@ -448,6 +448,22 @@ export const handlers = {
     return success({ items: campaigns });
   },
 
+  // ── Client Pool ──
+  getClientPool(employee: RegisteredEmployee, params: any): JsonResponse {
+    const zaloId = params.zaloId || employee.assigned_accounts[0];
+    if (!zaloId) return error('Missing zaloId');
+
+    const { entries, total } = db().getClientPool(zaloId, params.opts || {});
+    return success({ items: entries || [], total: total || 0 });
+  },
+
+  getClientPoolStats(employee: RegisteredEmployee, params: any): JsonResponse {
+    const zaloId = params.zaloId || employee.assigned_accounts[0];
+    if (!zaloId) return error('Missing zaloId');
+
+    return success(db().getClientPoolStats(zaloId));
+  },
+
   // ═══════════════════════════════════════════════════════════════
   // LABELS
   // ═══════════════════════════════════════════════════════════════

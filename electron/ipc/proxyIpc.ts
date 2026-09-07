@@ -2,6 +2,7 @@ import { ipcMain } from 'electron';
 import DatabaseService from '../../src/services/database/DatabaseService';
 import Logger from '../../src/utils/Logger';
 import { createProxyAgent } from '../../src/utils/ProxyHelper';
+import LoginService from '../../src/services/login/LoginService';
 
 export function registerProxyIpc() {
     // ─── Lấy danh sách proxies ─────────────────────────────────────────────────
@@ -70,6 +71,31 @@ export function registerProxyIpc() {
             return { success: true };
         } catch (err: any) {
             Logger.error(`[proxyIpc] setAccount error: ${err.message}`);
+            return { success: false, error: err.message };
+        }
+    });
+
+    // Kết nối lại nick để ăn proxy mới (P5.2) — đọc proxy mới nhất từ DB
+    ipcMain.handle('proxy:reconnectAccount', async (_event, { zaloId }: { zaloId: string }) => {
+        try {
+            if (!zaloId) return { success: false, error: 'Thiếu zaloId' };
+            const acc = DatabaseService.getInstance().getAccounts().find((a: any) => a.zalo_id === zaloId);
+            if (!acc) return { success: false, error: 'Không tìm thấy tài khoản' };
+            if ((acc as any).channel && (acc as any).channel !== 'zalo') {
+                return { success: false, error: 'Chỉ hỗ trợ kết nối lại nick Zalo' };
+            }
+            const loginService = new LoginService();
+            try { await loginService.disconnectUser(zaloId); } catch {}
+            const ok = await loginService.connectUser({
+                imei: (acc as any).imei,
+                cookies: (acc as any).cookies,
+                userAgent: (acc as any).user_agent,
+                proxyId: (acc as any).proxy_id ?? null,
+            });
+            if (!ok) return { success: false, error: 'Kết nối lại thất bại (kiểm tra cookie/proxy)' };
+            return { success: true };
+        } catch (err: any) {
+            Logger.error(`[proxyIpc] reconnectAccount error: ${err.message}`);
             return { success: false, error: err.message };
         }
     });

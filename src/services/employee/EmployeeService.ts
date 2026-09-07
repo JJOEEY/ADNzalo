@@ -7,7 +7,7 @@ import type { Employee, EmployeePermission, EmployeeWithDetails, EmployeeModule 
 
 const BCRYPT_ROUNDS = 12;
 const JWT_EXPIRES_IN = '7d';
-const ALL_MODULES = ['chat', 'friends', 'crm', 'workflow', 'integration', 'analytics', 'ai_assistant', 'settings'] as const;
+const ALL_MODULES = ['chat', 'friends', 'crm', 'erp', 'workflow', 'integration', 'analytics', 'ai_assistant', 'facebook', 'settings', 'settings_accounts', 'settings_employees'] as const;
 
 class EmployeeService {
     private static instance: EmployeeService;

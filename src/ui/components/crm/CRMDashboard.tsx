@@ -12,6 +12,15 @@ import DataAccessor from '@/lib/data/DataAccessor';
 import ipc from '@/lib/ipc';
 import { CampaignIcon, ChartIcon, ChatIcon, CheckIcon, CloudIcon, EditIcon, GhostIcon, HardDriveIcon, InboxIcon, PlayIcon, SendIcon, ShuffleIcon, TagIcon, UserCheckIcon, UserIcon, UsersIcon } from '@/components/common/icons';
 import { CHANNEL } from '@/lib/channelHelper';
+import { CLIENT_STAGES } from '../../../models/crm';
+
+function fmtPoolMoney(v: number): string {
+  if (!v) return '';
+  if (v >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(v % 1_000_000_000 === 0 ? 0 : 1)} tỷ`;
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(v % 1_000_000 === 0 ? 0 : 1)}tr`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(0)}k`;
+  return String(v);
+}
 
 // ── Mini stat card ─────────────────────────────────────────────────────────────
 function MiniStat({ icon, label, value, sub, color = 'blue', onClick }: {
@@ -115,6 +124,7 @@ export default function CRMDashboard() {
   const { activeAccountId } = useAccountStore();
 
   const [contactStats, setContactStats] = useState({ total: 0, friendCount: 0, noteCount: 0 });
+  const [poolStats, setPoolStats] = useState<{ total: number; byStage: Record<string, number>; closedValue: number }>({ total: 0, byStage: {}, closedValue: 0 });
   const [campaignStats, setCampaignStats] = useState<CampaignStat[]>([]);
   const [loadingCampStats, setLoadingCampStats] = useState(false);
 
@@ -389,6 +399,9 @@ export default function CRMDashboard() {
     DataAccessor.getContactStats({ zaloId: activeAccountId })
       .then(r => { if (r?.success) setContactStats({ total: r.total, friendCount: r.friendCount, noteCount: r.noteCount }); })
       .catch(() => {});
+    DataAccessor.getClientPoolStats({ zaloId: activeAccountId })
+      .then(r => { if (r?.success) setPoolStats({ total: r.total || 0, byStage: r.byStage || {}, closedValue: r.closedValue || 0 }); })
+      .catch(() => {});
     setLoadingCampStats(true);
     DataAccessor.getCampaignStats({ zaloId: activeAccountId, limit: 10 })
       .then(r => { if (r?.success) setCampaignStats(r.stats); })
@@ -413,6 +426,7 @@ export default function CRMDashboard() {
 
 
   const { total: totalContacts, friendCount, noteCount } = contactStats;
+  const poolConv = poolStats.total > 0 ? Math.round((poolStats.byStage.closed || 0) / poolStats.total * 100) : 0;
   const activeCamps  = campaigns.filter(c => c.status === 'active').length;
   const pausedCamps  = campaigns.filter(c => c.status === 'paused').length;
   const doneCamps    = campaigns.filter(c => c.status === 'done').length;
@@ -451,6 +465,26 @@ export default function CRMDashboard() {
 
   return (
     <div className="flex-1 overflow-y-auto p-5 space-y-4">
+
+      {/* ── Client Pool funnel (P4.3: KPI bán hàng/Chứng khoán) ── */}
+      {poolStats.total > 0 && (
+        <div className="bg-gray-800/50 border border-gray-700 rounded-2xl p-4">
+          <h3 className="text-[14px] font-semibold text-gray-400 uppercase tracking-wider mb-3">
+            Client Pool ({poolStats.total}) · Chốt {poolConv}%{poolStats.closedValue > 0 ? ` · ${fmtPoolMoney(poolStats.closedValue)}` : ''}
+          </h3>
+          <div className="grid grid-cols-5 gap-2">
+            {CLIENT_STAGES.map((s) => (
+              <MiniStat key={s.value}
+                icon={<span className="text-xs">●</span>}
+                label={s.label}
+                value={poolStats.byStage[s.value] || 0}
+                color={s.value === 'closed' ? 'green' : s.value === 'lost' ? 'red' : s.value === 'consulting' ? 'blue' : s.value === 'nurturing' ? 'yellow' : 'gray'}
+                onClick={() => { store.setTab('pool'); }} />
+            ))}
+          </div>
+          <ProgressBar value={poolConv} color="#22c55e" />
+        </div>
+      )}
 
       {/* ── Row 1: Contacts + Campaigns ── */}
       <div className="grid grid-cols-2 gap-4">

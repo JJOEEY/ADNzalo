@@ -60,7 +60,7 @@ export interface CRMContact {
   birthday?: string | null;
 }
 
-export type CRMTabView = 'contacts' | 'campaigns' | 'history' | 'groups' | 'search' | 'requests' | 'scan' | 'scan_history' | 'scan_stats';
+export type CRMTabView = 'contacts' | 'pool' | 'campaigns' | 'history' | 'groups' | 'search' | 'requests' | 'scan' | 'scan_history' | 'scan_stats';
 
 export type ContactTypeFilter = 'friend' | 'group' | 'non_friend' | 'has_phone' | 'has_notes';
 

@@ -273,6 +273,20 @@ export default function ProxySettings() {
   const [editTarget, setEditTarget] = useState<ProxyItem | null>(null);
   const { showNotification } = useAppStore();
   const { accounts } = useAccountStore();
+  const [reconnectingId, setReconnectingId] = useState<string | null>(null);
+
+  const handleReconnect = async (zaloId: string, name: string) => {
+    if (reconnectingId) return;
+    setReconnectingId(zaloId);
+    try {
+      const res = await (ipc.proxy as any)?.reconnectAccount?.(zaloId);
+      if (res?.success) showNotification(`Đã kết nối lại ${name} qua proxy mới`, 'success');
+      else showNotification(res?.error || 'Kết nối lại thất bại', 'error');
+    } catch (e: any) {
+      showNotification(e?.message || 'Kết nối lại thất bại', 'error');
+    }
+    setReconnectingId(null);
+  };
 
   // Accounts indexed by proxy_id
   const accountsByProxy = React.useMemo(() => {
@@ -504,6 +518,14 @@ export default function ProxySettings() {
                         {p.name}
                       </span>
                     )}
+                    {p && <TestProxyButton proxy={p} size="xs" />}
+                    <button
+                      onClick={() => handleReconnect(acc.zalo_id, acc.full_name || acc.zalo_id)}
+                      disabled={reconnectingId === acc.zalo_id}
+                      title="Ngắt và kết nối lại nick để ăn proxy mới"
+                      className="text-[11px] px-2 py-1 rounded-lg border border-gray-600 text-gray-400 hover:text-blue-300 hover:border-blue-500/50 disabled:opacity-50 transition-colors flex-shrink-0">
+                      {reconnectingId === acc.zalo_id ? 'Đang KN...' : 'Kết nối lại'}
+                    </button>
                   </div>
                 );
               })}

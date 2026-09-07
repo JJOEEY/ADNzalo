@@ -2933,4 +2933,35 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       { id: 'e3', source: 'n3', target: 'n4' },
     ],
   },
+
+  // CSKH-01. Hâm nóng khách im lặng tự động (AI win-back, không cần Sheets)
+  {
+    id: 'tpl-winback-silent-auto',
+    name: 'CSKH: Hâm nóng khách im lặng (tự động)',
+    description: 'Mỗi sáng tự tìm liên hệ không tương tác quá 30 ngày, AI viết tin hỏi thăm cá nhân hóa rồi gửi. Không cần nhập tay qua Sheets.',
+    category: 'marketing',
+    tags: ['win-back', 'khách im lặng', 'chăm sóc lại', 'AI', 'tự động'],
+    icon: <BotIcon className="w-4 h-4" />,
+    difficulty: 'easy',
+    nodes: [
+      { id: 'n1', type: 'trigger.customerInactive', label: 'Khách im lặng 30 ngày', position: { x: 300, y: 50 },
+        config: { ...DEFAULT_CONFIGS['trigger.customerInactive'] } },
+      { id: 'n2', type: 'ai.generateText', label: 'AI viết tin hỏi thăm', position: { x: 300, y: 210 },
+        config: {
+          aiConfigMode: 'assistant', assistantId: '', platform: 'openai', apiKey: '', model: 'gpt-5.6-luna',
+          systemPrompt: 'Bạn là nhân viên chăm sóc khách hàng, giọng thân thiện như nhắn Zalo thật. Viết 1 tin nhắn hỏi thăm ngắn (dưới 300 ký tự) để hâm nóng lại mối quan hệ, có thể kèm 1 ưu đãi/điểm mới. Không chào hỏi sáo rỗng.',
+          prompt: 'Khách tên {{ $trigger.displayName }}, đã {{ $trigger.daysSilent }} ngày không tương tác. Viết tin hỏi thăm.',
+          maxTokens: 300, temperature: 0.8,
+        } },
+      { id: 'n3', type: 'zalo.sendMessage', label: 'Gửi tin hâm nóng', position: { x: 300, y: 370 },
+        config: { ...DEFAULT_CONFIGS['zalo.sendMessage'], threadId: '{{ $trigger.threadId }}', threadType: '0', message: '{{ $node.n2.output }}' } },
+      { id: 'n4', type: 'output.log', label: 'Ghi log', position: { x: 300, y: 530 },
+        config: { message: 'Đã hâm nóng {{ $trigger.displayName }} (im lặng {{ $trigger.daysSilent }} ngày)', level: 'info' } },
+    ],
+    edges: [
+      { id: 'e1', source: 'n1', target: 'n2' },
+      { id: 'e2', source: 'n2', target: 'n3' },
+      { id: 'e3', source: 'n3', target: 'n4' },
+    ],
+  },
 ];

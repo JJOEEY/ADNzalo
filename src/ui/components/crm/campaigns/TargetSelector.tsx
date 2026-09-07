@@ -26,7 +26,7 @@ interface TargetSelectorProps {
   headerContent?: React.ReactNode;
 }
 
-type SelectMode = 'manual' | 'by_label' | 'friends_only' | 'groups_only' | 'by_phone' | 'by_uid' | 'by_group';
+type SelectMode = 'manual' | 'by_label' | 'friends_only' | 'groups_only' | 'by_phone' | 'by_uid' | 'by_group' | 'silent';
 
 /** Nhãn Zalo lưu ID nhóm với tiền tố "g" (vd "g4579..."); contact_id trong CRM thì không. Bỏ tiền tố để so khớp. */
 function stripGroupPrefix(id: string): string {
@@ -65,6 +65,9 @@ export default function TargetSelector({ zaloId, allLabels, localLabels, localLa
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
   const [groupMemberCounts, setGroupMemberCounts] = useState<Record<string, number>>({});
   const [groupConfirmLoading, setGroupConfirmLoading] = useState(false);
+
+  // ── Silent mode: khách im lặng N ngày (chăm sóc lại / warm-up) ──
+  const [silentDays, setSilentDays] = useState(30);
 
   // Label section scroll ref
   const labelScrollRef = useRef<HTMLDivElement>(null);
@@ -118,7 +121,7 @@ export default function TargetSelector({ zaloId, allLabels, localLabels, localLa
   useEffect(() => {
     setManualSelected(new Set());
     setSelectedGroupIds(new Set());
-  }, [mode, selectedZaloLabelIds, selectedLocalLabelIds]);
+  }, [mode, selectedZaloLabelIds, selectedLocalLabelIds, silentDays]);
 
   // Available = not already in campaign
   const available = useMemo(() =>
@@ -131,6 +134,10 @@ export default function TargetSelector({ zaloId, allLabels, localLabels, localLa
     let list = available;
     if (mode === 'friends_only') list = list.filter(c => c.is_friend === 1);
     if (mode === 'groups_only') list = list.filter(c => c.contact_type === 'group');
+    if (mode === 'silent') {
+      const cutoff = Date.now() - silentDays * 86400 * 1000;
+      list = list.filter(c => c.contact_type !== 'group' && Number(c.last_message_time || 0) < cutoff);
+    }
     if (mode === 'by_label') {
       // Filter by selected Zalo labels.
       // Nhãn Zalo lưu ID nhóm có tiền tố "g" (vd "g4579..."), còn contact_id trong CRM
@@ -164,7 +171,7 @@ export default function TargetSelector({ zaloId, allLabels, localLabels, localLa
       );
     }
     return list;
-  }, [available, mode, selectedZaloLabelIds, selectedLocalLabelIds, search, allLabels, effectiveThreadMap]);
+  }, [available, mode, selectedZaloLabelIds, selectedLocalLabelIds, search, allLabels, effectiveThreadMap, silentDays]);
 
   // ── Phone input handling - siết chuẩn VN 10 số 0[35789]xxxxxxxx (dù dán cả đoạn text) ──
   useEffect(() => {
@@ -473,6 +480,7 @@ export default function TargetSelector({ zaloId, allLabels, localLabels, localLa
             { key: 'friends_only' as const, label: 'Bạn bè' },
             { key: 'groups_only' as const, label: 'Nhóm' },
             { key: 'by_group' as const, label: 'Theo thành viên nhóm' },
+            { key: 'silent' as const, label: 'Khách im lặng' },
           ]).map(({ key, label }) => (
             <button key={key} onClick={() => setMode(key)}
               className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap flex-shrink-0 ${
@@ -482,6 +490,22 @@ export default function TargetSelector({ zaloId, allLabels, localLabels, localLa
         </div>
 
         {/* ── Label filter chips (by_label mode) ── */}
+        {/* Silent mode config */}
+        {mode === 'silent' && (
+          <div className="border-b border-gray-700 flex-shrink-0 px-4 py-2.5 flex items-center gap-2">
+            <span className="text-[11px] text-gray-400">Khách không tương tác quá</span>
+            <select value={silentDays} onChange={(e) => setSilentDays(Number(e.target.value))}
+              className="bg-gray-800 border border-gray-600 rounded-lg px-2 py-1 text-xs text-gray-200 outline-none focus:border-blue-500">
+              <option value={7}>7 ngày</option>
+              <option value={14}>14 ngày</option>
+              <option value={30}>30 ngày</option>
+              <option value={60}>60 ngày</option>
+              <option value={90}>90 ngày</option>
+            </select>
+            <span className="text-[11px] text-blue-400">{filtered.length} liên hệ phù hợp</span>
+          </div>
+        )}
+
         {mode === 'by_label' && (
           <div className="border-b border-gray-700 flex-shrink-0 px-4 py-2.5 space-y-2">
             {/* Tab switcher */}
