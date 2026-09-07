@@ -77,11 +77,12 @@ QUY TẮC BẮT BUỘC:
 }
 
 export default function CampaignAIScriptDialog({ senderName: initialSender, channel, onApply, onClose }: CampaignAIScriptDialogProps) {
-  const { showNotification } = useAppStore();
+  const { showNotification, setView } = useAppStore();
   const [product, setProduct] = useState('');
   const [goal, setGoal] = useState(GOALS[0].value);
   const [tone, setTone] = useState(TONES[0].value);
-  const [count, setCount] = useState(2);
+  // 3-5 biến thể để xoay vòng (random) khi gửi — tránh spam do trùng nội dung
+  const [count, setCount] = useState(3);
   const [senderName, setSenderName] = useState(initialSender);
   const [assistants, setAssistants] = useState<any[]>([]);
   const [selectedAssistantId, setSelectedAssistantId] = useState('');
@@ -220,10 +221,10 @@ export default function CampaignAIScriptDialog({ senderName: initialSender, chan
               </select>
             </div>
             <div>
-              <label className="text-gray-400 text-xs font-medium mb-1.5 block">Số biến thể</label>
-              <select value={count} onChange={(e) => setCount(parseInt(e.target.value) || 2)}
+              <label className="text-gray-400 text-xs font-medium mb-1.5 block">Số biến thể (xoay vòng)</label>
+              <select value={count} onChange={(e) => setCount(parseInt(e.target.value) || 3)}
                 className="w-full bg-gray-900 border border-gray-600 rounded-xl px-2.5 py-2 text-sm text-gray-200 outline-none focus:border-violet-500">
-                {[1, 2, 3].map((n) => <option key={n} value={n}>{n} biến thể</option>)}
+                {[3, 4, 5].map((n) => <option key={n} value={n}>{n} biến thể</option>)}
               </select>
             </div>
           </div>
@@ -237,7 +238,16 @@ export default function CampaignAIScriptDialog({ senderName: initialSender, chan
           </div>
 
           {error && (
-            <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">{error}</p>
+            <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2.5 space-y-2">
+              <p className="text-xs text-red-400">{error.replace('AI_MISSING_KEY: ', '')}</p>
+              {/AI_MISSING_KEY|api key|API key|401|unauthorized/i.test(error) && (
+                <button
+                  onClick={() => { onClose(); setView('integration'); }}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 transition-colors font-medium">
+                  Mở cài đặt AI để dán key
+                </button>
+              )}
+            </div>
           )}
 
           {/* Variations preview */}

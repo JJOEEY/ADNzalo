@@ -358,8 +358,15 @@ VÍ DỤ ĐẦU RA ĐÚNG:
     const temperature = assistant.temperature ?? 0.7;
     const model = normalizeModelName(assistant.model);
 
+    // Key: ưu tiên key của assistant (DB, đã mã hóa), fallback OPENAI_API_KEY
+    // trong env (dev/VPS). Không log giá trị key — chỉ preview mask bên dưới.
+    const effectiveKey = assistant.apiKey || (process.env.OPENAI_API_KEY || '');
+    if (!effectiveKey) {
+      throw new Error(`AI_MISSING_KEY: Trợ lý "${assistant.name}" chưa có API key — vào Tích hợp → Trợ lý AI để dán key`);
+    }
+
     // Debug: log request info
-    const keyPreview = assistant.apiKey ? `${assistant.apiKey.substring(0, 8)}...${assistant.apiKey.substring(assistant.apiKey.length - 4)}` : '(empty)';
+    const keyPreview = `${effectiveKey.substring(0, 8)}...${effectiveKey.substring(effectiveKey.length - 4)}`;
     Logger.info(`[AIAssistant] callLLM → platform=${assistant.platform}, model=${model}${model !== assistant.model ? ` (normalized from ${assistant.model})` : ''}, keyPreview=${keyPreview}, maxTokens=${maxTokens}`);
 
     let result = '';
@@ -368,13 +375,13 @@ VÍ DỤ ĐẦU RA ĐÚNG:
     let totalTokens = 0;
 
     try {
-      const geminiApiUrl = resolveApiUrl('gemini', model, assistant.apiKey, assistant.baseUrl);
-      const claudeApiUrl = resolveApiUrl('claude', model, assistant.apiKey, assistant.baseUrl);
-      const openaiApiUrl = resolveApiUrl(assistant.platform, model, assistant.apiKey, assistant.baseUrl);
+      const geminiApiUrl = resolveApiUrl('gemini', model, effectiveKey, assistant.baseUrl);
+      const claudeApiUrl = resolveApiUrl('claude', model, effectiveKey, assistant.baseUrl);
+      const openaiApiUrl = resolveApiUrl(assistant.platform, model, effectiveKey, assistant.baseUrl);
 
       if (assistant.platform === 'gemini') {
         const geminiContents = openaiMessagesToGemini(messages);
-        Logger.info(`[AIAssistant] Gemini URL (masked): ${geminiApiUrl.replace(assistant.apiKey, '***')}`);
+        Logger.info(`[AIAssistant] Gemini URL (masked): ${geminiApiUrl.replace(effectiveKey, '***')}`);
         const res = await axios.post(
           geminiApiUrl,
           {
@@ -403,7 +410,7 @@ VÍ DỤ ĐẦU RA ĐÚNG:
           },
           {
             headers: {
-              'x-api-key': assistant.apiKey,
+              'x-api-key': effectiveKey,
               'anthropic-version': '2023-06-01',
               'Content-Type': 'application/json',
             },
@@ -424,7 +431,7 @@ VÍ DỤ ĐẦU RA ĐÚNG:
           { model, messages, ...tokenParam, temperature },
           {
             headers: {
-              Authorization: `Bearer ${assistant.apiKey}`,
+              Authorization: `Bearer ${effectiveKey}`,
               'Content-Type': 'application/json',
             },
             timeout: 60000,

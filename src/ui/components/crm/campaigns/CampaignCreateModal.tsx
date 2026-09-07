@@ -605,18 +605,16 @@ export default function CampaignCreateModal({
   const senderName = senderAccount?.full_name || senderAccount?.display_name || '';
   const [showAIDialog, setShowAIDialog] = useState(false);
 
-  // Thêm biến thể AI: nếu các block hiện tại đều trống thì thay thế, ngược lại append
+  // Thêm biến thể AI: nếu các block hiện tại đều trống thì thay thế, ngược lại append.
+  // Nhiều hơn 1 block → bật random để xoay vòng nội dung, tránh spam do trùng tin.
   const applyAIVariations = (texts: string[]) => {
     const fresh = texts.filter((t) => t.trim()).map((t) => ({ id: genId(), text: t.trim(), images: [] as string[] }));
     if (!fresh.length) return;
     setContentConfig((prev) => {
       const allEmpty = prev.blocks.every((b) => !b.text.trim() && b.images.length === 0);
-      if (allEmpty) {
-        setActiveBlock(0);
-        return { ...prev, blocks: fresh };
-      }
-      setActiveBlock(prev.blocks.length);
-      return { ...prev, blocks: [...prev.blocks, ...fresh] };
+      const blocks = allEmpty ? fresh : [...prev.blocks, ...fresh];
+      setActiveBlock(allEmpty ? 0 : prev.blocks.length);
+      return { ...prev, blocks, mode: blocks.length > 1 ? 'random' : prev.mode };
     });
   };
 
