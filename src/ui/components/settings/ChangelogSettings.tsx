@@ -15,6 +15,90 @@ interface VersionEntry {
 // ─── Changelog data - thêm entry mới vào ĐẦU mảng khi có bản cập nhật ────────
 const CHANGELOG: VersionEntry[] = [
   {
+    version: '1.3.0',
+    date: '09/2026',
+    type: 'minor',
+    highlights: [
+      '📇 Client Pool — Kanban chăm sóc khách hàng theo stage (Mới/Đang tư vấn/Chốt sale/Chăm lại/Mất)',
+      '🤖 Chăm sóc chủ động — Trigger khách im lặng N ngày + template AI hâm nóng tự động',
+      '🏷️ Tag nick ở inbox gộp + nhãn Zalo 2 chiều + thử lại tin campaign lỗi',
+    ],
+    changes: [
+      {
+        category: 'new',
+        items: [
+          'Client Pool: bảng client_pool + lịch sử đổi stage (giai đoạn, nhân viên phụ trách, giá trị)',
+          'Client Pool: tab Kanban kéo-thả, lọc tìm kiếm/nhân viên/im lặng, preset lọc đã lưu',
+          'Import thành viên nhóm quét được vào Client Pool (giai đoạn Mới)',
+          'Trigger workflow Khách im lặng N ngày (cron quét, lọc nhãn, giới hạn/lần, biến $trigger.*)',
+          'Template CSKH hâm nóng khách im lặng: AI viết tin cá nhân hóa rồi gửi tự động',
+          'TargetSelector: chế độ Khách im lặng (7/14/30/60/90 ngày) cho campaign',
+          'Tag tên nick ở dòng hội thoại + đầu đoạn chat khi ở chế độ inbox gộp',
+          'Nhãn link 2 chiều: mirror đổi tên/màu từ Zalo, Zalo xóa thì gỡ link giữ gán luồng',
+          'Campaign: nút Thử lại tin lỗi (tự chạy tiếp), funnel Client Pool trên dashboard',
+          'Relay: chặn command vượt quyền theo module nhân viên (crm/workflow/AI, Boss-only cho proxy/phone/settings)',
+          'Proxy: nút Test + Kết nối lại từng nick để ăn proxy mới ngay',
+          'Sticker Telegram-user, khôi phục lọc Chưa trả lời',
+        ],
+      },
+      {
+        category: 'improved',
+        items: [
+          'Lọc liên hệ (giới tính/sinh nhật/nhãn/SĐT/ghi chú) chuyển xuống backend — đúng tổng/phân trang',
+          'AI xưng đúng tên nick gửi (truyền zaloId qua suggest/chat/panel/campaign)',
+          'Engine workflow hỗ trợ 9Router + baseUrl custom, node AI tự dùng trợ lý mặc định',
+          'Đồng bộ 8 nền tảng AI (OpenAI/Claude/Gemini/Deepseek/Grok/Mistral/9Router/OpenRouter)',
+          'Chuẩn hóa 12 module phân quyền Boss–nhân viên',
+        ],
+      },
+      {
+        category: 'fixed',
+        items: [
+          'Sửa retry zpw_sek backend quét không bao giờ chạy (lan truyền lỗi phiên, hash full cookie)',
+        ],
+      },
+    ],
+  },
+  {
+    version: '1.2.0',
+    date: '09/2026',
+    type: 'minor',
+    highlights: [
+      '✨ AI viết kịch bản chiến dịch — 3–5 biến thể xoay vòng, xưng hô theo nick gửi ({sender_name})',
+      'Nút Tích hợp trên sidebar (AI & kết nối bên thứ ba)',
+    ],
+    changes: [
+      {
+        category: 'new',
+        items: [
+          'Dialog AI sinh kịch bản campaign (mục tiêu/giọng điệu/số biến thể, preview theo nick)',
+          'Placeholder {sender_name} resolve theo từng nick lúc gửi',
+          'Nút Tích hợp trên sidebar vào trang AI & kết nối',
+          'Fallback OPENAI_API_KEY, báo thiếu key rõ ràng kèm nút mở cài đặt AI',
+        ],
+      },
+    ],
+  },
+  {
+    version: '1.1.0',
+    date: '09/2026',
+    type: 'minor',
+    highlights: [
+      'Backend quét một đầu mối adncapital.com.vn + kho thành viên tích lũy',
+      'Xoay vòng đa nick khi quét nhóm bị giới hạn',
+    ],
+    changes: [
+      {
+        category: 'new',
+        items: [
+          'Bỏ fallback deplaoapp.com, backend tích lũy kho thành viên theo groupId',
+          'FE xoay vòng tối đa 4 nick đã đăng nhập để tìm nick có quyền xem',
+          'Gỡ module affiliate/thanh toán/nhóm chung',
+        ],
+      },
+    ],
+  },
+  {
     version: '26.8.5',
     date: '08/2026',
     type: 'minor',
