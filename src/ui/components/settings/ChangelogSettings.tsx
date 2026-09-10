@@ -15,6 +15,35 @@ interface VersionEntry {
 // ─── Changelog data - thêm entry mới vào ĐẦU mảng khi có bản cập nhật ────────
 const CHANGELOG: VersionEntry[] = [
   {
+    version: '1.4.0',
+    date: '09/2026',
+    type: 'minor',
+    highlights: [
+      '📤 Campaign nhiều nick gửi — 1 chiến dịch chia đều target round-robin, mỗi nick 1 queue riêng, tiến độ gộp chung',
+      '📈 AI trả lời kèm dữ liệu chứng khoán LIVE từ cổng ADN MCP (adn-ai-bot)',
+    ],
+    changes: [
+      {
+        category: 'new',
+        items: [
+          'Chọn nhiều nick gửi khi tạo/sửa chiến dịch — target tự chia đều, mỗi nick chạy queue riêng với token bucket riêng',
+          'Tiến độ chiến dịch vẫn gộp: tổng đã gửi/pending/failed xem ở một chỗ, hiển thị danh sách nick gửi trong chi tiết',
+          'Dữ liệu chứng khoán LIVE cho AI: kết nối cổng ADN MCP (/api/cowork/*) của app ADN Capital — chỉ số, độ rộng, dòng tiền, MA/RSI, P/E…',
+          'Mục cấu hình "Dữ liệu chứng khoán LIVE (ADN MCP)" trong Trợ lý AI: bật/tắt, Base URL, API key, nút kiểm tra kết nối',
+        ],
+      },
+      {
+        category: 'fixed',
+        items: [
+          'Queue chiến dịch không tự chạy lại sau khi khởi động lại app (thiếu return trong getActiveCampaignOwners)',
+          'Queue của nick gửi không tự tắt khi chiến dịch xong — giờ kiểm tra cả bảng sender',
+          'Sửa chiến dịch làm mất danh sách nick gửi đã chọn (edit modal không truyền sender_zalo_ids)',
+          'Nhân bản chiến dịch không chia lại target cho nick gửi của bản copy',
+        ],
+      },
+    ],
+  },
+  {
     version: '1.3.3',
     date: '09/2026',
     type: 'patch',

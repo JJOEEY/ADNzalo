@@ -11,6 +11,7 @@ import { safeStorage } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import DatabaseService from '../database/DatabaseService';
 import IntegrationRegistry from '../integrations/IntegrationRegistry';
+import ADNMarketDataService from './ADNMarketDataService';
 import Logger from '../../utils/Logger';
 import type { AIAssistant, AIAssistantFile, ChatMessage, AIPlatform } from '../../models';
 
@@ -655,8 +656,18 @@ YÊU CẦU BẮT BUỘC:
 
     const senderName = opts?.senderName || this.getSenderNameForZaloId(opts?.zaloId) || undefined;
     const systemPrompt = await this.buildSystemPrompt(assistant, structured, senderName);
+
+    // Ngữ cảnh chứng khoán LIVE từ cổng ADN MCP — chỉ fetch khi tin nhắn có dấu hiệu CK
+    let stockContext = '';
+    try {
+      const lastUserMsg = [...conversationMessages].reverse().find(m => m.role === 'user')?.content || '';
+      stockContext = await ADNMarketDataService.getInstance().buildStockContext(lastUserMsg);
+    } catch (e: any) {
+      Logger.warn(`[AIAssistant] buildStockContext failed: ${e.message}`);
+    }
+
     const messages: ChatMessage[] = [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: systemPrompt + stockContext },
       ...conversationMessages.map(m => ({
         role: m.role as 'user' | 'assistant',
         content: m.content,

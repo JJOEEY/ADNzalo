@@ -816,6 +816,20 @@ class DatabaseService {
         try { this.exec(`ALTER TABLE crm_campaigns ADD COLUMN mixed_config TEXT NOT NULL DEFAULT '{}'`); } catch {}
         try { this.exec(`ALTER TABLE crm_campaigns ADD COLUMN channel TEXT NOT NULL DEFAULT 'zalo'`); } catch {}
 
+        // A campaign can send through several Zalo accounts. The legacy
+        // owner_zalo_id remains the creator/compatibility owner.
+        this.exec(`
+            CREATE TABLE IF NOT EXISTS crm_campaign_accounts (
+                campaign_id INTEGER NOT NULL,
+                zalo_id TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (campaign_id, zalo_id),
+                FOREIGN KEY(campaign_id) REFERENCES crm_campaigns(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_crm_campaign_accounts_zalo ON crm_campaign_accounts(zalo_id, campaign_id);
+        `);
+
         this.exec(`
             CREATE TABLE IF NOT EXISTS crm_campaign_contacts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -5669,16 +5683,22 @@ class DatabaseService {
             const todayStart = new Date();
             todayStart.setHours(0, 0, 0, 0);
             const todayStartMs = todayStart.getTime();
-            return this.query<any>(
+            const rows = this.query<any>(
                 `SELECT c.*,
                     (SELECT COUNT(*) FROM crm_campaign_contacts cc WHERE cc.campaign_id=c.id) as total_contacts,
                     (SELECT COUNT(*) FROM crm_campaign_contacts cc WHERE cc.campaign_id=c.id AND cc.status='sent') as sent_count,
                     (SELECT COUNT(*) FROM crm_campaign_contacts cc WHERE cc.campaign_id=c.id AND cc.status='pending') as pending_count,
                     (SELECT COUNT(*) FROM crm_campaign_contacts cc WHERE cc.campaign_id=c.id AND cc.status='failed') as failed_count,
                     (SELECT COUNT(*) FROM crm_campaign_contacts cc WHERE cc.campaign_id=c.id AND cc.status='sent' AND cc.sent_at >= ?) as sent_today_count
-                 FROM crm_campaigns c WHERE c.owner_zalo_id=? ORDER BY c.created_at DESC`,
-                [todayStartMs, ownerZaloId]
+                 FROM crm_campaigns c
+                 WHERE c.owner_zalo_id=? OR EXISTS (
+                    SELECT 1 FROM crm_campaign_accounts ca
+                    WHERE ca.campaign_id=c.id AND ca.zalo_id=? AND ca.enabled=1
+                 )
+                 ORDER BY c.created_at DESC`,
+                [todayStartMs, ownerZaloId, ownerZaloId]
             );
+            return rows.map((row: any) => ({ ...row, sender_zalo_ids: this.getCampaignSenderIds(row.id) }));
         } catch (err: any) { Logger.error(`[DB] getCRMCampaigns: ${err.message}`); return []; }
     }
 
@@ -5686,7 +5706,7 @@ class DatabaseService {
         if (!this.initialized) return null;
         try {
             const rows = this.query<any>(`SELECT * FROM crm_campaigns WHERE id=?`, [campaignId]);
-            return rows[0] || null;
+            return rows[0] ? { ...rows[0], sender_zalo_ids: this.getCampaignSenderIds(campaignId) } : null;
         } catch (err: any) { Logger.error(`[DB] getCRMCampaign: ${err.message}`); return null; }
     }
 
@@ -5713,14 +5733,50 @@ class DatabaseService {
                     `UPDATE crm_campaigns SET channel=?, name=?, template_message=?, friend_request_message=?, campaign_type=?, mixed_config=?, status=?, delay_seconds=?, delay_min_seconds=?, delay_max_seconds=?, per_contact_delay_min_seconds=?, per_contact_delay_max_seconds=?, daily_send_limit=?, daily_start_time=?, updated_at=? WHERE id=? AND owner_zalo_id=?`,
                     [channel, campaign.name, campaign.template_message || '', frMsg, type, mixedCfg, status, compatDelaySeconds, delayMin, delayMax, perContactMin, perContactMax, dailyLimit, dailyStartTime, now, campaign.id, campaign.owner_zalo_id]
                 );
+                if (this.syncCampaignAccounts(campaign.id, campaign.sender_zalo_ids, campaign.owner_zalo_id)) {
+                    this.redistributePendingContacts(campaign.id);
+                }
                 return campaign.id;
             } else {
-                return this.runInsert(
+                const id = this.runInsert(
                     `INSERT INTO crm_campaigns (owner_zalo_id, channel, name, template_message, friend_request_message, campaign_type, mixed_config, status, delay_seconds, delay_min_seconds, delay_max_seconds, per_contact_delay_min_seconds, per_contact_delay_max_seconds, daily_send_limit, daily_start_time, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                     [campaign.owner_zalo_id, channel, campaign.name, campaign.template_message, frMsg, type, mixedCfg, campaign.status || 'draft', compatDelaySeconds, delayMin, delayMax, perContactMin, perContactMax, dailyLimit, dailyStartTime, now, now]
                 );
+                this.syncCampaignAccounts(id, campaign.sender_zalo_ids, campaign.owner_zalo_id);
+                return id;
             }
         } catch (err: any) { Logger.error(`[DB] saveCRMCampaign: ${err.message}`); return 0; }
+    }
+
+    private syncCampaignAccounts(campaignId: number, senderIds?: string[], fallbackOwner?: string): boolean {
+        const ids = [...new Set((senderIds || []).filter(Boolean))];
+        if (ids.length === 0 && fallbackOwner) ids.push(fallbackOwner);
+        const old = this.getCampaignSenderIds(campaignId);
+        this.runNoSave(`DELETE FROM crm_campaign_accounts WHERE campaign_id=?`, [campaignId]);
+        const stmt = db!.prepare(`INSERT OR IGNORE INTO crm_campaign_accounts (campaign_id, zalo_id, enabled, created_at) VALUES (?,?,1,?)`);
+        for (const id of ids) stmt.run(campaignId, id, Date.now());
+        return JSON.stringify([...old].sort()) !== JSON.stringify([...ids].sort());
+    }
+
+    /** Chia lại target chưa gửi khi danh sách nick gửi đổi (tránh kẹt ở nick đã xóa) */
+    public redistributePendingContacts(campaignId: number): void {
+        try {
+            const senders = this.getCampaignSenderIds(campaignId);
+            if (senders.length === 0) return;
+            const pendings = this.query<any>(
+                `SELECT id FROM crm_campaign_contacts WHERE campaign_id=? AND status='pending' ORDER BY id`, [campaignId],
+            );
+            if (pendings.length === 0) return;
+            const stmt = db!.prepare(`UPDATE crm_campaign_contacts SET owner_zalo_id=? WHERE id=?`);
+            pendings.forEach((row: any, i: number) => stmt.run(senders[i % senders.length], row.id));
+            Logger.log(`[DB] redistributePendingContacts: campaign ${campaignId} → ${pendings.length} targets / ${senders.length} senders`);
+        } catch (err: any) { Logger.error(`[DB] redistributePendingContacts: ${err.message}`); }
+    }
+
+    public getCampaignSenderIds(campaignId: number): string[] {
+        try {
+            return this.query<any>(`SELECT zalo_id FROM crm_campaign_accounts WHERE campaign_id=? AND enabled=1 ORDER BY created_at, zalo_id`, [campaignId]).map(r => r.zalo_id);
+        } catch { return []; }
     }
 
     public updateCRMCampaignStatus(campaignId: number, status: CRMCampaignStatus): void {
@@ -5732,6 +5788,7 @@ class DatabaseService {
     public deleteCRMCampaign(campaignId: number, ownerZaloId: string): void {
         if (!this.initialized) return;
         try {
+            this.runNoSave(`DELETE FROM crm_campaign_accounts WHERE campaign_id=?`, [campaignId]);
             this.runNoSave(`DELETE FROM crm_campaign_contacts WHERE campaign_id=?`, [campaignId]);
             this.runNoSave(`DELETE FROM crm_campaigns WHERE id=? AND owner_zalo_id=?`, [campaignId, ownerZaloId]);
             this.save();
@@ -5762,10 +5819,15 @@ class DatabaseService {
                          (campaign_id, owner_zalo_id, contact_id, display_name, avatar, status, sent_at, retry_count, error)
                          VALUES (?,?,?,?,?,?,?,?,?)`
                     );
-                    for (const c of contacts) {
+                    // Re-distribute targets round-robin across the clone's senders so a
+                    // copy made under a different sender set keeps balanced queues.
+                    const senders = this.getCampaignSenderIds(newId);
+                    for (let i = 0; i < contacts.length; i++) {
+                        const c = contacts[i];
+                        const sender = senders.length > 0 ? senders[i % senders.length] : ownerZaloId;
                         stmt.run(
                             newId,
-                            ownerZaloId,
+                            sender,
                             c.contact_id ?? '',
                             c.display_name ?? '',
                             c.avatar ?? '',
@@ -5789,8 +5851,12 @@ class DatabaseService {
             const stmt = db!.prepare(
                 `INSERT OR IGNORE INTO crm_campaign_contacts (campaign_id, owner_zalo_id, contact_id, display_name, avatar, phone, status, sent_at, retry_count, error) VALUES (?,?,?,?,?,?,'pending',0,0,'')`
             );
-            for (const c of contacts) {
-                stmt.run(campaignId, ownerZaloId, c.contactId, c.displayName || '', c.avatar || '', c.phone || '');
+            const senders = this.getCampaignSenderIds(campaignId);
+            for (let i = 0; i < contacts.length; i++) {
+                const c = contacts[i];
+                // One delivery per target, distributed evenly across selected senders.
+                const sender = senders.length > 0 ? senders[i % senders.length] : ownerZaloId;
+                stmt.run(campaignId, sender, c.contactId, c.displayName || '', c.avatar || '', c.phone || '');
             }
             this.save();
         } catch (err: any) { Logger.error(`[DB] addCampaignContacts: ${err.message}`); }
@@ -5880,16 +5946,20 @@ class DatabaseService {
         } catch (err: any) { Logger.error(`[DB] getNextPendingCampaignContact: ${err.message}`); return null; }
     }
 
-    /** Kiểm tra có campaign nào đang active không */
+    /** Kiểm tra account này còn việc phải gửi không (chỉ đếm target gán cho chính nó) */
     public hasActiveCampaigns(ownerZaloId: string): boolean {
         if (!this.initialized) return false;
         try {
             const rows = this.query<any>(
                 `SELECT 1 FROM crm_campaigns c
-                 WHERE c.owner_zalo_id=? AND c.status='active'
-                 AND EXISTS (SELECT 1 FROM crm_campaign_contacts cc WHERE cc.campaign_id=c.id AND cc.status='pending')
+                 WHERE c.status='active'
+                 AND (c.owner_zalo_id=? OR EXISTS (
+                    SELECT 1 FROM crm_campaign_accounts ca
+                    WHERE ca.campaign_id=c.id AND ca.zalo_id=? AND ca.enabled=1
+                 ))
+                 AND EXISTS (SELECT 1 FROM crm_campaign_contacts cc WHERE cc.campaign_id=c.id AND cc.owner_zalo_id=? AND cc.status='pending')
                  LIMIT 1`,
-                [ownerZaloId]
+                [ownerZaloId, ownerZaloId, ownerZaloId]
             );
             return rows.length > 0;
         } catch { return false; }
@@ -5899,9 +5969,13 @@ class DatabaseService {
     public getActiveCampaignOwners(): string[] {
         if (!this.initialized) return [];
         try {
-            return this.query<any>(
-                `SELECT DISTINCT owner_zalo_id FROM crm_campaigns WHERE status='active'`, []
-            ).map((r: any) => r.owner_zalo_id);
+            const rows = this.query<any>(
+                `SELECT DISTINCT cc.zalo_id FROM crm_campaign_accounts cc
+                 JOIN crm_campaigns c ON c.id=cc.campaign_id
+                 WHERE c.status='active' AND cc.enabled=1
+                 UNION SELECT DISTINCT owner_zalo_id FROM crm_campaigns WHERE status='active'`, []
+            );
+            return rows.map((r: any) => r.zalo_id || r.owner_zalo_id).filter(Boolean);
         } catch (err: any) { Logger.error(`[DB] getActiveCampaignOwners: ${err.message}`); return []; }
     }
 

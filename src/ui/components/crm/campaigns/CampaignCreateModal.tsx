@@ -32,6 +32,7 @@ interface CampaignFormData {
   per_contact_delay_max_seconds?: number;
   daily_send_limit: number;
   daily_start_time: string;
+  sender_zalo_ids?: string[];
 }
 
 interface CampaignCreateModalProps {
@@ -604,6 +605,20 @@ export default function CampaignCreateModal({
   const senderAccount = accounts.find((a) => a.zalo_id === zaloId) ?? accounts.find((a) => a.zalo_id === activeAccountId);
   const senderName = senderAccount?.full_name || senderAccount?.display_name || '';
   const [showAIDialog, setShowAIDialog] = useState(false);
+  const senderAccounts = accounts.filter((a) => (a.channel || 'zalo') === 'zalo');
+  const [selectedSenderIds, setSelectedSenderIds] = useState<string[]>(() => {
+    const initial = (initialData as any)?.sender_zalo_ids;
+    return Array.isArray(initial) && initial.length > 0 ? initial : (zaloId ? [zaloId] : []);
+  });
+
+  const toggleSender = (id: string) => {
+    setSelectedSenderIds((prev) => {
+      if (prev.includes(id)) {
+        return prev.length > 1 ? prev.filter((item) => item !== id) : prev;
+      }
+      return [...prev, id];
+    });
+  };
 
   // Thêm biến thể AI: nếu các block hiện tại đều trống thì thay thế, ngược lại append.
   // Nhiều hơn 1 block → bật random để xoay vòng nội dung, tránh spam do trùng tin.
@@ -683,6 +698,7 @@ export default function CampaignCreateModal({
       per_contact_delay_max_seconds: pcDelayMax,
       daily_send_limit: dailyLimit,
       daily_start_time: dailyStartTime,
+      sender_zalo_ids: selectedSenderIds,
     });
     setSaving(false);
     onClose();
@@ -762,6 +778,33 @@ export default function CampaignCreateModal({
                 ))}
               </div>
             </div>
+
+            {/* Sender accounts */}
+            {senderAccounts.length > 1 && !telegramCampaign && (
+              <div>
+                <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider block mb-1.5">
+                  Nick gửi chiến dịch
+                </label>
+                <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                  {senderAccounts.map((account) => {
+                    const checked = selectedSenderIds.includes(account.zalo_id);
+                    return (
+                      <button key={account.zalo_id} type="button" onClick={() => toggleSender(account.zalo_id)}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg border text-left ${checked ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 text-gray-400 hover:border-gray-600'}`}>
+                        <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center ${checked ? 'bg-blue-500 border-blue-500' : 'border-gray-500'}`}>
+                          {checked && <span className="text-white text-[9px]">✓</span>}
+                        </span>
+                        <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[9px] flex items-center justify-center flex-shrink-0">
+                          {(account.full_name || account.zalo_id).charAt(0).toUpperCase()}
+                        </span>
+                        <span className="text-[11px] text-gray-200 truncate">{account.full_name || account.zalo_id}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[10px] text-gray-500 mt-1">Target sẽ được chia đều cho {selectedSenderIds.length} nick.</p>
+              </div>
+            )}
 
             {/* Mixed actions */}
             {type === 'mixed' && (

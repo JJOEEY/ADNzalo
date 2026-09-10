@@ -419,6 +419,10 @@ declare global {
         getAccountAssistants: (zaloId: string) => Promise<{ success: boolean; suggestion?: string | null; panel?: string | null; error?: string }>;
         getUsageLogs:  (opts?: { assistantId?: string; dateFrom?: number; dateTo?: number; limit?: number }) => Promise<{ success: boolean; logs: any[]; error?: string }>;
         getUsageStats: (opts?: { assistantId?: string; days?: number }) => Promise<{ success: boolean; stats: any[]; error?: string }>;
+        // ADN MCP market data (live stock context)
+        getMarketConfig:      () => Promise<{ success: boolean; config?: { enabled: boolean; baseUrl: string; apiKey: string }; error?: string }>;
+        saveMarketConfig:     (config: { enabled: boolean; baseUrl: string; apiKey: string }) => Promise<{ success: boolean; error?: string }>;
+        testMarketConnection: () => Promise<{ success: boolean; message?: string; error?: string }>;
         // AI Conversations
         getOrCreateConversation: (params: { zaloId: string; threadId: string; assistantId: string }) => Promise<{ success: boolean; conversation?: any; error?: string }>;
         getConversationMessages: (params: { conversationId: string }) => Promise<{ success: boolean; messages: any[]; error?: string }>;

@@ -3,6 +3,7 @@ import type { CRMCampaign } from '@/store/crmStore';
 import type { LabelData } from '@/store/appStore';
 import DataAccessor from '@/lib/data/DataAccessor';
 import ipc from '@/lib/ipc';
+import { useAccountStore } from '@/store/accountStore';
 import TargetSelector from './TargetSelector';
 import CampaignCreateModal from './CampaignCreateModal';
 import { ChartIcon, ClockIcon, EditIcon, SendIcon, UsersIcon } from '@/components/common/icons';
@@ -43,6 +44,7 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 export default function CampaignDetail({ campaign, zaloId, channel, allLabels, localLabels, localLabelThreadMap, onStatusChange, onAddContacts, onUpdate }: CampaignDetailProps) {
+  const accounts = useAccountStore((s) => s.accounts);
   const [contacts, setContacts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showTargetSelector, setShowTargetSelector] = useState(false);
@@ -147,6 +149,11 @@ export default function CampaignDetail({ campaign, zaloId, channel, allLabels, l
                 ? <> · <ChartIcon className="w-4 h-4 inline" /> {campaign.daily_send_limit}/ngày từ {campaign.daily_start_time}</>
                 : <> · 🕐 Chạy từ {campaign.daily_start_time}</>}
             </p>
+            {Array.isArray(campaign.sender_zalo_ids) && campaign.sender_zalo_ids.length > 0 && (
+              <p className="text-[11px] text-blue-300 mt-1 truncate" title={campaign.sender_zalo_ids.join(', ')}>
+                Nick gửi: {campaign.sender_zalo_ids.map((id) => accounts.find((a) => a.zalo_id === id)?.full_name || id).join(', ')}
+              </p>
+            )}
           </div>
           <div className="flex gap-1.5 flex-shrink-0">
             {/* Nút Sửa: chỉ hiện khi nháp hoặc tạm dừng */}
@@ -364,6 +371,7 @@ export default function CampaignDetail({ campaign, zaloId, channel, allLabels, l
             per_contact_delay_max_seconds: campaign.per_contact_delay_max_seconds,
             daily_send_limit: campaign.daily_send_limit,
             daily_start_time: campaign.daily_start_time,
+            sender_zalo_ids: campaign.sender_zalo_ids,
           }}
           onClose={() => setShowEdit(false)}
           onSave={async (data) => {

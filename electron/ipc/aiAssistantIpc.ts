@@ -2,6 +2,7 @@ import { ipcMain } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import AIAssistantService from '../../src/services/ai/AIAssistantService';
+import ADNMarketDataService from '../../src/services/ai/ADNMarketDataService';
 import DatabaseService from '../../src/services/database/DatabaseService';
 import WorkspaceManager from '../../src/utils/WorkspaceManager';
 import { proxyToBoss } from './proxyHelper';
@@ -272,7 +273,42 @@ export function registerAIAssistantIpc(): void {
     }
   });
 
-  // ─── Usage logs & reporting ────────────────────────────────────────────────
+  // ─── ADN MCP market data (live stock context) ────────────────────────────────
+  ipcMain.handle('ai:getMarketConfig', async () => {
+    try {
+      if (isEmployeeMode()) return await proxyToBossWithResult('ai:getMarketConfig', {});
+      const config = ADNMarketDataService.getInstance().getConfig();
+      return { success: true, config: { ...config, apiKey: config.apiKey ? '***' : '' } };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('ai:saveMarketConfig', async (_e, { config }: { config: any }) => {
+    try {
+      if (isEmployeeMode()) { proxyToBoss('ai:saveMarketConfig', { config }); return { success: true }; }
+      // Giữ key cũ khi UI gửi về placeholder '***'
+      const existing = ADNMarketDataService.getInstance().getConfig();
+      ADNMarketDataService.getInstance().saveConfig({
+        ...config,
+        apiKey: config?.apiKey === '***' ? existing.apiKey : (config?.apiKey || ''),
+      });
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('ai:testMarketConnection', async () => {
+    try {
+      if (isEmployeeMode()) return await proxyToBossWithResult('ai:testMarketConnection', {});
+      return await ADNMarketDataService.getInstance().testConnection();
+    } catch (e: any) {
+      return { success: false, message: e.message };
+    }
+  });
+
+  // ─── Usage logs & reporting ──────────────────────────────────────────────────
   ipcMain.handle('ai:getUsageLogs', async (_e, opts: any) => {
     try {
             if (isEmployeeMode()) return await proxyToBossWithResult('ai:getUsageLogs', opts);

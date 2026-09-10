@@ -240,6 +240,14 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
   const [selectedPosIds, setSelectedPosIds] = useState<Set<string>>(new Set());
   const [pinnedProducts, setPinnedProducts] = useState<any[]>([]);
 
+  // ADN MCP market data config
+  const [marketEnabled, setMarketEnabled] = useState(false);
+  const [marketBaseUrl, setMarketBaseUrl] = useState('http://localhost:3000');
+  const [marketApiKey, setMarketApiKey] = useState('');
+  const [marketSaving, setMarketSaving] = useState(false);
+  const [marketTesting, setMarketTesting] = useState(false);
+  const [marketResult, setMarketResult] = useState<{ success: boolean; message: string } | null>(null);
+
   // Usage report state
   const [usageStats, setUsageStats] = useState<UsageStat[]>([]);
   const [usageLogs, setUsageLogs] = useState<any[]>([]);
@@ -299,6 +307,16 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
         if (res?.success) setFiles(res.files || []);
       } catch {}
     }
+
+    // Load ADN MCP market config (global, không phụ thuộc assistantId)
+    try {
+      const res = await ipc.ai.getMarketConfig();
+      if (res?.success && res.config) {
+        setMarketEnabled(!!res.config.enabled);
+        setMarketBaseUrl(res.config.baseUrl || 'http://localhost:3000');
+        setMarketApiKey(res.config.apiKey || '');  // '***' = giữ key cũ
+      }
+    } catch {}
   }, [assistantId]);
 
   useEffect(() => { loadData(); }, [loadData]);
@@ -933,6 +951,62 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
                     Tìm & ghim sản phẩm để AI biết thông tin khi tư vấn. Bấm ✕ để hủy sản phẩm đã ghim.
                   </p>
                 </div>
+              )}
+            </div>
+          </div>
+
+          {/* ADN MCP market data (live stock context) */}
+          <div>
+            <h2 className="text-sm font-semibold text-gray-300 mb-2"><ChartIcon className="w-4 h-4 inline" /> Dữ liệu chứng khoán LIVE (ADN MCP)</h2>
+            <div className="bg-gray-800 rounded-xl p-4 space-y-3">
+              <p className="text-[10px] text-gray-400 leading-relaxed">
+                ℹ️ Kết nối cổng dữ liệu ADN Capital (repo <span className="font-mono">D:\BOT\adn-ai-bot</span>, route <span className="font-mono">/api/cowork/*</span>) để AI trả lời có số liệu thị trường live: chỉ số, độ rộng, dòng tiền, MA/RSI, P/E… Chỉ tự động nạp khi hội thoại có dấu hiệu chứng khoán (mã CK, "phân tích", "mua/bán"…).
+              </p>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={marketEnabled} onChange={e => setMarketEnabled(e.target.checked)} className="accent-blue-500"/>
+                <span className="text-xs text-gray-300">Bật dữ liệu chứng khoán live</span>
+              </label>
+              {marketEnabled && (
+                <>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Base URL của app ADN Capital</label>
+                    <input value={marketBaseUrl} onChange={e => setMarketBaseUrl(e.target.value)}
+                      placeholder="http://localhost:3000 hoặc https://adncapital.com.vn"
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"/>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">API key (trùng ADN_API_KEY bên app ADN Capital)</label>
+                    <input type="password" value={marketApiKey} onChange={e => setMarketApiKey(e.target.value)}
+                      placeholder="ADN_API_KEY từ .env của adn-ai-bot"
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"/>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={async () => {
+                      setMarketSaving(true); setMarketResult(null);
+                      const res = await ipc.ai.saveMarketConfig({ enabled: marketEnabled, baseUrl: marketBaseUrl.trim(), apiKey: marketApiKey });
+                      setMarketSaving(false);
+                      setMarketResult(res?.success
+                        ? { success: true, message: 'Đã lưu cấu hình ADN MCP' }
+                        : { success: false, message: res?.error || 'Không lưu được cấu hình' });
+                    }} disabled={marketSaving}
+                      className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg transition-colors font-medium">
+                      {marketSaving ? 'Đang lưu...' : 'Lưu cấu hình'}
+                    </button>
+                    <button onClick={async () => {
+                      setMarketTesting(true); setMarketResult(null);
+                      await ipc.ai.saveMarketConfig({ enabled: marketEnabled, baseUrl: marketBaseUrl.trim(), apiKey: marketApiKey });
+                      const res = await ipc.ai.testMarketConnection();
+                      setMarketTesting(false);
+                      setMarketResult({ success: !!res?.success, message: res?.message || res?.error || 'Không xác định' });
+                    }} disabled={marketTesting}
+                      className="px-3 py-1.5 text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-gray-200 rounded-lg transition-colors border border-gray-600">
+                      {marketTesting ? 'Đang kiểm tra...' : 'Kiểm tra kết nối'}
+                    </button>
+                  </div>
+                  {marketResult && (
+                    <p className={`text-[11px] ${marketResult.success ? 'text-green-400' : 'text-red-400'}`}>{marketResult.message}</p>
+                  )}
+                </>
               )}
             </div>
           </div>

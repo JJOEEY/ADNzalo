@@ -384,6 +384,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAccountAssistants: (zaloId: string) => ipcRenderer.invoke('ai:getAccountAssistants', { zaloId }),
     getUsageLogs:  (opts?: any) => ipcRenderer.invoke('ai:getUsageLogs', opts || {}),
     getUsageStats: (opts?: any) => ipcRenderer.invoke('ai:getUsageStats', opts || {}),
+    // ADN MCP market data (live stock context)
+    getMarketConfig:      () => ipcRenderer.invoke('ai:getMarketConfig'),
+    saveMarketConfig:     (config: any) => ipcRenderer.invoke('ai:saveMarketConfig', { config }),
+    testMarketConnection: () => ipcRenderer.invoke('ai:testMarketConnection'),
     // AI Conversations
     getOrCreateConversation: (params: any) => ipcRenderer.invoke('ai:getOrCreateConversation', params),
     getConversationMessages: (params: any) => ipcRenderer.invoke('ai:getConversationMessages', params),

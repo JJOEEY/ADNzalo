@@ -44,6 +44,7 @@ export interface CRMCampaign {
     pending_count?: number;
     failed_count?: number;
     sent_today_count?: number;
+    sender_zalo_ids?: string[];
 }
 
 export interface CRMCampaignContact {

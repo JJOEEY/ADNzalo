@@ -132,8 +132,16 @@ export function registerCRMIpc(): void {
         try {
             const capability = validateCampaignForChannel(zaloId, campaign);
             if (!capability.allowed) return { success: false, error: capability.reason };
-            const id = DatabaseService.getInstance().saveCRMCampaign({ ...campaign, owner_zalo_id: zaloId });
-            DatabaseService.getInstance().save();
+            const db = DatabaseService.getInstance();
+            const requestedSenders = Array.isArray(campaign?.sender_zalo_ids) ? campaign.sender_zalo_ids : [];
+            const knownAccounts = new Map(db.getAccounts().map((account: any) => [account.zalo_id, account]));
+            const sender_zalo_ids = [...new Set(requestedSenders.filter((id: string) => {
+                const account = knownAccounts.get(id);
+                return account && (!account.channel || account.channel === 'zalo') && account.is_active !== 0;
+            }))];
+            if (sender_zalo_ids.length === 0) sender_zalo_ids.push(zaloId);
+            const id = db.saveCRMCampaign({ ...campaign, sender_zalo_ids, owner_zalo_id: zaloId });
+            db.save();
             EventBroadcaster.emit('crm:campaignChanged', { action: 'save', ownerZaloId: zaloId, id, campaign });
 
             // Upload embedded campaign images to Boss so they exist on Boss filesystem
@@ -205,8 +213,13 @@ export function registerCRMIpc(): void {
             // Start/stop queue
             const campaign = db.getCRMCampaign(campaignId);
             if (campaign) {
-                if (status === 'active') CRMQueueService.getInstance().startForAccount(campaign.owner_zalo_id);
-                else if (status === 'paused' || status === 'done') CRMQueueService.getInstance().checkAndStopIfIdle(campaign.owner_zalo_id);
+                const senderIds = db.getCampaignSenderIds(campaignId);
+                const queueAccounts = senderIds.length > 0 ? senderIds : [campaign.owner_zalo_id];
+                if (status === 'active') {
+                    for (const senderId of queueAccounts) CRMQueueService.getInstance().startForAccount(senderId);
+                } else if (status === 'paused' || status === 'done') {
+                    for (const senderId of queueAccounts) CRMQueueService.getInstance().checkAndStopIfIdle(senderId);
+                }
                 EventBroadcaster.emit('crm:campaignChanged', { action: 'status', ownerZaloId: campaign.owner_zalo_id, campaignId, status });
                 proxyToBoss('crm:updateCampaignStatus', { campaignId, status });
             }
@@ -217,7 +230,8 @@ export function registerCRMIpc(): void {
     ipcMain.handle('crm:addCampaignContacts', async (_e, { zaloId, campaignId, contacts }: { zaloId: string; campaignId: number; contacts: any[] }) => {
         try {
             const campaign = DatabaseService.getInstance().getCRMCampaign(campaignId);
-            if (!campaign || campaign.owner_zalo_id !== zaloId) return { success: false, error: 'Không tìm thấy chiến dịch' };
+            const senderIds = campaign ? DatabaseService.getInstance().getCampaignSenderIds(campaignId) : [];
+            if (!campaign || (campaign.owner_zalo_id !== zaloId && !senderIds.includes(zaloId))) return { success: false, error: 'Không tìm thấy chiến dịch' };
             const capability = validateCampaignForChannel(zaloId, campaign);
             if (!capability.allowed) return { success: false, error: capability.reason };
             DatabaseService.getInstance().addCampaignContacts(campaignId, zaloId, contacts);

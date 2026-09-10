@@ -18,6 +18,7 @@ export type CRMCampaignType = 'message' | 'friend_request' | 'mixed' | 'invite_t
 export interface CRMCampaign {
   id: number;
   owner_zalo_id: string;
+  sender_zalo_ids?: string[];
   name: string;
   template_message: string;
   friend_request_message: string;
