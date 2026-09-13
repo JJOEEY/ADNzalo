@@ -58,11 +58,6 @@ export default function Sidebar({ onAddAccount }: SidebarProps) {
   const [showToolsGuide, setShowToolsGuide] = useState(false);
   const hasNewCRMRequests = Object.values(crmRequestUnseenByAccount || {}).some(Boolean);
 
-  // Red dot cho CRM → Nhóm → Quét thành viên (chưa xem)
-  const hasScanNewDot = (() => {
-    try { return localStorage.getItem('scanTabSeen') !== 'true'; } catch { return false; }
-  })();
-
   // Chấm đỏ trên nút Settings - tắt khi người dùng đã xem hết các tab quan trọng
   const [hasNewSettings, setHasNewSettings] = useState(() => hasUnseenSettingsTabs());
   useEffect(() => {
@@ -405,7 +400,7 @@ export default function Sidebar({ onAddAccount }: SidebarProps) {
       <div className={`border-t border-gray-700 py-2 flex flex-col gap-1 flex-shrink-0 ${isExpanded ? 'px-2' : 'items-center'}`}>
         <NavBtnFriendly icon="dashboard"  label="Dashboard" desc="Tổng quan" active={view === 'dashboard'}  onClick={() => setView('dashboard')} expanded={isExpanded} />
         {hasPerm('chat') && <NavBtnFriendly icon="chat" label="Chat" desc="Tin nhắn" active={view === 'chat'} onClick={() => setView('chat')} expanded={isExpanded} />}
-        {hasPerm('crm') && <NavBtnFriendly icon="crm" label="CRM" desc="Khách hàng" active={view === 'crm'} onClick={() => setView('crm')} dot={hasNewCRMRequests || hasScanNewDot} expanded={isExpanded} />}
+        {hasPerm('crm') && <NavBtnFriendly icon="crm" label="CRM" desc="Khách hàng" active={view === 'crm'} onClick={() => setView('crm')} dot={hasNewCRMRequests} expanded={isExpanded} />}
         {hasPerm('workflow') && <NavBtnFriendly icon="workflow" label="Workflow" desc="Tự động hoá" active={view === 'workflow'} onClick={() => setView('workflow')} expanded={isExpanded} />}
         {hasPerm('integration') && <NavBtnFriendly icon="integration" label="Tích hợp" desc="AI & kết nối" active={view === 'integration'} onClick={() => setView('integration')} expanded={isExpanded} />}
         <NavBtnFriendly icon="settings" label="Cài đặt" desc="AI & Proxy" active={view === 'settings'} onClick={() => setView('settings')} dot={hasNewSettings} expanded={isExpanded} />
@@ -773,7 +768,7 @@ const TOOLS_GUIDE = [
           'Khi có người react tin nhắn (like, heart, haha...)',
           'Khi gắn/gỡ nhãn: liên kết CRM → Workflow liền mạch',
           'Chạy theo lịch hẹn (cron): hàng ngày, hàng giờ, ngày cụ thể',
-          'Khi nhận thanh toán (webhook từ Casso/SePay)',
+          'Khi nhận webhook từ hệ thống bên ngoài',
           'Chạy thủ công: nút bấm test từ giao diện',
         ],
       },
@@ -812,15 +807,6 @@ const TOOLS_GUIDE = [
           'Gọi API/Webhook HTTP bên ngoài: kết nối bất kỳ hệ thống nào',
         ],
       },
-      {
-        icon: <StoreIcon className="w-4 h-4 inline" />,
-        title: 'POS & Vận chuyển trong Workflow',
-        items: [
-          'KiotViet / Haravan / Sapo / Nhanh: tra cứu KH, đơn hàng, sản phẩm, tạo đơn',
-          'GHN / GHTK: tạo đơn vận chuyển, tra cứu vận đơn - ngay trong luồng tự động',
-          'Casso / SePay (VietQR): lấy lịch sử giao dịch, đối soát thanh toán',
-        ],
-      },
     ],
   },
   {
@@ -828,54 +814,25 @@ const TOOLS_GUIDE = [
     icon: <LinkIcon className="w-4 h-4" />, title: 'Tích hợp - Kết nối bên thứ 3',
     color: 'border-green-500/40 bg-green-900/30',
     badgeColor: 'bg-gray-800 text-gray-300',
-    purpose: 'Kết nối ADNzalo với hệ sinh thái bán hàng, thanh toán, vận chuyển Việt Nam. Tra cứu dữ liệu ngay trong khung chat, nhận webhook tự động, kết hợp Workflow để xử lý end-to-end.',
+    purpose: 'Kết nối ADNzalo với dịch vụ bên ngoài qua API và webhook, rồi kết hợp Workflow để xử lý dữ liệu theo quy trình.',
     sections: [
-      {
-        icon: <ShoppingCartIcon className="w-4 h-4 inline" />,
-        title: 'POS / Bán hàng (4 nền tảng)',
-        items: [
-          'KiotViet: tra cứu khách hàng, đơn hàng, sản phẩm, tạo đơn - phổ biến nhất VN',
-          'Haravan: nền tảng TMĐT, tra cứu đơn hàng online, khách hàng',
-          'Sapo: quản lý bán hàng đa kênh, tra cứu đơn/khách theo SĐT',
-          'Nhanh.vn: tra cứu đơn, sản phẩm, khách hàng, tạo đơn',
-          '→ Tất cả đều tra cứu trực tiếp từ khung chat bằng nút tắt hoặc shortcut',
-        ],
-      },
-      {
-        icon: <CreditCardIcon className="w-4 h-4 inline" />,
-        title: 'Thanh toán (2 nền tảng)',
-        items: [
-          'Casso: kết nối ngân hàng, nhận webhook khi có chuyển khoản mới - realtime',
-          'SePay (VietQR): tương tự Casso, hỗ trợ nhiều ngân hàng VN',
-          'Webhook tự nhận về app tại http://127.0.0.1:9888/webhook/{type}',
-          'Kết hợp Workflow trigger.payment → gửi tin cảm ơn + xác nhận đơn tự động',
-        ],
-      },
-      {
-        icon: <TruckIcon className="w-4 h-4 inline" />,
-        title: 'Vận chuyển (2 nền tảng)',
-        items: [
-          'GHN Express: tạo đơn giao hàng, tra cứu mã vận đơn + trạng thái',
-          'GHTK: tạo đơn + tra cứu tracking - đối soát COD',
-        ],
-      },
       {
         icon: <GlobeIcon className="w-4 h-4 inline" />,
         title: 'Tunnel - Mở kết nối ra internet',
         items: [
           'Bật thủ công khi cần: tạo URL công khai (https://xxx.loca.lt) trỏ về app',
-          'Cho phép bên ngoài (Casso, SePay, n8n cloud...) gửi webhook về ADNzalo',
+          'Cho phép dịch vụ bên ngoài gửi webhook về ADNzalo',
           'Không bật = webhook chỉ hoạt động trên localhost (cùng máy)',
           'Tắt bất cứ lúc nào - không ảnh hưởng các tính năng khác',
         ],
       },
       {
-        icon: <LightningIcon className="w-4 h-4 inline" />,
-        title: 'Shortcut tra cứu nhanh',
+        icon: <LinkIcon className="w-4 h-4 inline" />,
+        title: 'Kết nối API bên ngoài',
         items: [
-          'Ghim các nút tra cứu POS/vận chuyển ngay trên thanh công cụ chat',
-          'Bấm 1 lần → tra cứu đơn hàng / khách hàng theo SĐT người đang chat',
-          'Kết quả hiển thị ngay trong popup - không cần rời khung chat',
+          'Workflow có thể gửi HTTP request đến API theo điều kiện đã cấu hình',
+          'Webhook từ dịch vụ ngoài có thể kích hoạt workflow',
+          'Dữ liệu nhận được có thể ghi vào Google Sheets hoặc dùng cho các bước tiếp theo',
         ],
       },
     ],
@@ -886,18 +843,18 @@ const TOOLS_GUIDE = [
 
 const COMBO_SCENARIOS = [
   {
-    icon: <DollarIcon className="w-4 h-4" />,
-    title: 'Xác nhận thanh toán tự động',
+    icon: <LinkIcon className="w-4 h-4" />,
+    title: 'Xử lý webhook tự động',
     tags: ['Tích hợp', 'Workflow'],
     color: 'border-emerald-500/30',
     flow: [
-      { icon: <LinkIcon className="w-3 h-3" />, text: 'SePay/Casso nhận CK' },
-      { icon: <SettingsIcon className="w-3 h-3" />, text: 'Trigger payment' },
-      { icon: <EditIcon className="w-3 h-3" />, text: 'Ghép tin "Cảm ơn {tên}, đơn #{mã} đã nhận {số tiền}"' },
-      { icon: <MessageCircleIcon className="w-3 h-3" />, text: 'Gửi tin Zalo' },
-      { icon: <TagIcon className="w-3 h-3" />, text: 'Gắn nhãn "Đã TT"' },
+      { icon: <LinkIcon className="w-3 h-3" />, text: 'Dịch vụ gửi webhook' },
+      { icon: <SettingsIcon className="w-3 h-3" />, text: 'Workflow kiểm tra dữ liệu' },
+      { icon: <EditIcon className="w-3 h-3" />, text: 'Ghi dữ liệu vào Sheets' },
+      { icon: <MessageCircleIcon className="w-3 h-3" />, text: 'Gửi thông báo' },
+      { icon: <TagIcon className="w-3 h-3" />, text: 'Lưu nhật ký xử lý' },
     ],
-    desc: 'Khách chuyển khoản → ADNzalo nhận webhook từ ngân hàng → Workflow tự động gửi tin xác nhận + gắn nhãn CRM.',
+    desc: 'Dịch vụ bên ngoài gửi dữ liệu → workflow kiểm tra điều kiện → lưu thông tin và gửi thông báo phù hợp.',
   },
   {
     icon: <BotIcon className="w-4 h-4" />,
@@ -928,19 +885,6 @@ const COMBO_SCENARIOS = [
     desc: 'Khi có người gửi kết bạn → auto accept → gửi lời chào + menu dịch vụ → gắn nhãn CRM → ghi thông tin vào Sheets.',
   },
   {
-    icon: <ShoppingCartIcon className="w-4 h-4" />,
-    title: 'Tra cứu đơn hàng ngay trong chat',
-    tags: ['Tích hợp', 'Workflow'],
-    color: 'border-orange-500/30',
-    flow: [
-      { icon: <MessageCircleIcon className="w-3 h-3" />, text: 'Khách nhắn "đơn hàng"' },
-      { icon: <SearchIcon className="w-3 h-3" />, text: 'KiotViet tra SĐT' },
-      { icon: <EditIcon className="w-3 h-3" />, text: 'Ghép kết quả' },
-      { icon: <MessageCircleIcon className="w-3 h-3" />, text: 'Gửi thông tin đơn' },
-    ],
-    desc: 'Khách hỏi về đơn hàng → Workflow tự tra cứu KiotViet/Haravan theo SĐT → gửi lại thông tin đơn chi tiết.',
-  },
-  {
     icon: <CampaignIcon className="w-4 h-4" />,
     title: 'Chiến dịch remarketing theo nhãn',
     tags: ['CRM', 'Workflow'],
@@ -955,26 +899,12 @@ const COMBO_SCENARIOS = [
     desc: 'Lọc danh sách khách có nhãn cụ thể → tạo chiến dịch với nội dung cá nhân hóa → gửi tự động + theo dõi kết quả.',
   },
   {
-    icon: <PackageIcon className="w-4 h-4" />,
-    title: 'Đặt hàng + giao hàng tự động',
-    tags: ['Tích hợp', 'Workflow'],
-    color: 'border-cyan-500/30',
-    flow: [
-      { icon: <MessageCircleIcon className="w-3 h-3" />, text: 'Khách nhắn "MUA"' },
-      { icon: <ShoppingCartIcon className="w-3 h-3" />, text: 'Tạo đơn KiotViet' },
-      { icon: <TruckIcon className="w-3 h-3" />, text: 'Tạo vận đơn GHN' },
-      { icon: <MessageCircleIcon className="w-3 h-3" />, text: 'Gửi mã tracking' },
-      { icon: <TrendingUpIcon className="w-3 h-3" />, text: 'Ghi Sheets' },
-    ],
-    desc: 'Khách nhắn từ khóa → Workflow tạo đơn trên POS → tạo vận đơn GHN/GHTK → gửi mã tracking cho khách.',
-  },
-  {
     icon: <BellIcon className="w-4 h-4" />,
     title: 'Thông báo đa kênh khi có đơn mới',
     tags: ['Workflow', 'Tích hợp'],
     color: 'border-amber-500/30',
     flow: [
-      { icon: <DollarIcon className="w-3 h-3" />, text: 'Nhận thanh toán' },
+      { icon: <LinkIcon className="w-3 h-3" />, text: 'Nhận sự kiện workflow' },
       { icon: <MessageCircleIcon className="w-3 h-3" />, text: 'Gửi tin Zalo cho KH' },
       { icon: <BellIcon className="w-3 h-3" />, text: 'Thông báo Telegram cho admin' },
       { icon: <MailIcon className="w-3 h-3" />, text: 'Email cho kế toán' },

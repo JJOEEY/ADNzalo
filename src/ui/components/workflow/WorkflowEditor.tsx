@@ -252,7 +252,7 @@ export default function WorkflowEditor({ workflowId, onBack }: Props) {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNode, setSelectedNode] = useState<any | null>(null);
   const [workflowMeta, setWorkflowMeta] = useState({
-    name: '', description: '', enabled: true, channel: 'zalo' as Channel,
+    name: '', description: '', disabledReason: '', enabled: true, channel: 'zalo' as Channel,
     pageIds: [] as string[],   // new: multi-page
   });
   const [loadingEditor, setLoadingEditor] = useState(true);
@@ -289,6 +289,7 @@ export default function WorkflowEditor({ workflowId, onBack }: Props) {
       setWorkflowMeta({
         name: wf.name,
         description: wf.description || '',
+        disabledReason: wf.disabledReason || wf.disabled_reason || '',
         enabled: wf.enabled,
         channel: normalizeWorkflowChannel(wf.channel),
         pageIds: Array.isArray(wf.pageIds) ? wf.pageIds : (wf.pageId ? [wf.pageId] : []),
@@ -345,6 +346,7 @@ export default function WorkflowEditor({ workflowId, onBack }: Props) {
     id: workflowId,
     name: workflowMeta.name,
     description: workflowMeta.description,
+    disabledReason: workflowMeta.disabledReason,
     enabled: workflowMeta.enabled,
     channel: workflowMeta.channel,
     pageIds: workflowMeta.pageIds,
@@ -650,7 +652,11 @@ export default function WorkflowEditor({ workflowId, onBack }: Props) {
 
           {/* enabled toggle */}
           <button
-            onClick={() => setWorkflowMeta(m => ({ ...m, enabled: !m.enabled }))}
+            onClick={() => setWorkflowMeta(m => ({
+              ...m,
+              enabled: !m.enabled,
+              disabledReason: m.enabled ? m.disabledReason : '',
+            }))}
             className="flex items-center gap-2 cursor-pointer"
             title={workflowMeta.enabled ? 'Đang bật - nhấn để tắt' : 'Đang tắt - nhấn để bật'}
           >
@@ -753,4 +759,3 @@ export default function WorkflowEditor({ workflowId, onBack }: Props) {
     </div>
   );
 }
-

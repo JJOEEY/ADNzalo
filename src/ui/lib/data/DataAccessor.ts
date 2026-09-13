@@ -372,7 +372,7 @@ export class DataAccessor {
   static async saveClientPool(params: { zaloId: string; entry: any }) {
     if (isEmployee()) {
       const res = await rest().post('/api/command/crm/client-pool', params);
-      return { success: true, id: res.data?.id };
+      return { success: res.success, id: res.data?.id, error: res.error };
     }
     return window.electronAPI.crm.saveClientPool(params);
   }
@@ -402,6 +402,38 @@ export class DataAccessor {
   // ═════════════════════════════════════════════════════════════════
   // CRM CAMPAIGNS
   // ═════════════════════════════════════════════════════════════════
+
+  static async getCRMCommonScriptRules(params: { zaloId: string }) {
+    if (isEmployee()) {
+      const res = await rest().get('/api/query/crm/script-rules', params);
+      return { success: true, rules: res.data };
+    }
+    return window.electronAPI.crm.getScriptRules(params);
+  }
+
+  static async saveCRMCommonScriptRules(params: { zaloId: string; rulesText: string }) {
+    if (isEmployee()) {
+      const res = await rest().post('/api/command/crm/script-rules', params);
+      return { success: !!res?.success, rules: res?.data, error: res?.error };
+    }
+    return window.electronAPI.crm.saveScriptRules(params);
+  }
+
+  static async getCRMCampaignScriptExperiment(params: { zaloId: string; campaignId: number }) {
+    if (isEmployee()) {
+      const res = await rest().get('/api/query/crm/campaign-script-experiment', params);
+      return { success: res?.success !== false, experiment: res?.data?.experiment ?? null, error: res?.error };
+    }
+    return window.electronAPI.crm.getScriptExperiment(params);
+  }
+
+  static async saveCRMCampaignScriptExperiment(params: { zaloId: string; campaignId: number; experiment: any }) {
+    if (isEmployee()) {
+      const res = await rest().post('/api/command/crm/campaign-script-experiment', params);
+      return { success: !!res?.success, revision: res?.data?.revision, error: res?.error };
+    }
+    return window.electronAPI.crm.saveScriptExperiment(params);
+  }
 
   static async getCRMCampaigns(params: { zaloId: string }) {
     if (isEmployee()) {
@@ -664,6 +696,14 @@ export class DataAccessor {
       return { success: true, data: res.data };
     }
     return window.electronAPI.analytics.campaignComparison({ zaloId });
+  }
+
+  static async getCampaignVariantReport(zaloId: string) {
+    if (isEmployee()) {
+      const res = await rest().get('/api/query/analytics/campaign-variant-report', { zaloId });
+      return { success: true, data: res.data || [] };
+    }
+    return window.electronAPI.analytics.campaignVariantReport({ zaloId });
   }
 
   static async getFriendRequestAnalytics(params: {
@@ -1116,6 +1156,7 @@ export class DataAccessor {
     zaloId: string; contactId: string; displayName: string; avatarUrl: string;
     phone?: string; contactType?: string; gender?: number | null; birthday?: string | null;
     isBot?: number | null; manualDetails?: boolean;
+    phoneSource?: string; phoneConsent?: boolean; phoneConsentAt?: number;
   }) {
     if (isEmployee()) {
       return rest().post('/api/command/conversations/update-profile', params);

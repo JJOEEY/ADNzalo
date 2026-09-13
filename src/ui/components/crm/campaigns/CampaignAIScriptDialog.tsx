@@ -11,7 +11,8 @@ interface CampaignAIScriptDialogProps {
   /** zaloId nick gửi (nếu có) — để AI xưng hô đúng nick qua service */
   zaloId?: string;
   channel: Channel;
-  onApply: (texts: string[]) => void;
+  initialRulesSnapshot?: string;
+  onApply: (texts: string[], rulesSnapshot: string, rulesVersion: number) => void;
   onClose: () => void;
 }
 
@@ -64,26 +65,61 @@ function extractVariations(text: string, maxCount: number): string[] {
   return chunks.filter((s) => s.length > 10).slice(0, maxCount);
 }
 
-function buildSystemPrompt(count: number): string {
+const COMMON_SCRIPT_RULES = `Quy tắc chung:
+- Không bịa giá, ưu đãi, kết quả, chứng nhận hoặc cam kết không có trong thông tin đầu vào.
+- Không hứa hẹn lợi nhuận/kết quả chắc chắn; không tạo cảm giác khẩn cấp giả.
+- Dùng {sender_name} cho người gửi và {name} cho người nhận.
+- Mỗi tin nhắn dài 80–1000 ký tự, tối đa 2 emoji, có lời mời phản hồi tự nhiên.
+- Cụm từ cấm: cam kết 100%, đảm bảo lợi nhuận, chắc chắn sinh lời, không rủi ro.`;
+const CAMPAIGN_RULES_MARKER = '\n\nQuy tắc bổ sung cho campaign:\n';
+
+function initialCampaignRules(snapshot?: string): string {
+  if (!snapshot) return '';
+  const markerAt = snapshot.indexOf(CAMPAIGN_RULES_MARKER);
+  return markerAt >= 0 ? snapshot.slice(markerAt + CAMPAIGN_RULES_MARKER.length) : '';
+}
+
+function initialCommonRules(snapshot?: string): { version: number; text: string } | null {
+  if (!snapshot) return null;
+  const markerAt = snapshot.indexOf(CAMPAIGN_RULES_MARKER);
+  const common = markerAt >= 0 ? snapshot.slice(0, markerAt) : snapshot;
+  const match = common.match(/^Quy tắc chung v(\d+):\n([\s\S]*)$/);
+  return match ? { version: Number(match[1]) || 0, text: match[2] } : null;
+}
+
+export function validateCampaignVariation(text: string): string[] {
+  const issues: string[] = [];
+  if (text.length < 80 || text.length > 1000) issues.push('Độ dài phải từ 80 đến 1.000 ký tự');
+  if (!text.includes('{sender_name}')) issues.push('Thiếu placeholder {sender_name}');
+  if (!text.includes('{name}')) issues.push('Thiếu placeholder {name}');
+  const banned = ['cam kết 100%', 'đảm bảo lợi nhuận', 'chắc chắn sinh lời', 'không rủi ro'];
+  const hit = banned.find(phrase => text.toLocaleLowerCase('vi').includes(phrase));
+  if (hit) issues.push(`Có cụm từ cần tránh: “${hit}”`);
+  return issues;
+}
+
+function buildSystemPrompt(count: number, rules: string): string {
   return `Bạn là copywriter viết tin nhắn Zalo/Telegram cho phần mềm CRM.
 Nhiệm vụ: dựa trên yêu cầu của người dùng, trả về ĐÚNG ${count} biến thể tin nhắn.
 
-QUY TẮC BẮT BUỘC:
-1. Chỉ trả về JSON hợp lệ, KHÔNG giải thích, KHÔNG markdown fence: {"variations": ["...", "..."]}
-2. Mỗi biến thể là tin nhắn đầy đủ ý (400–1000 ký tự), tiếng Việt tự nhiên, có cấu trúc:
-   chào người nhận → tự giới thiệu (dùng placeholder) → giá trị/lợi ích cụ thể → kêu gọi hành động rõ ràng (tham gia nhóm / trả lời / xem link).
-3. Tự xưng của NGƯỜI GỬI luôn dùng placeholder {sender_name} — KHÔNG BAO GIỜ ghi tên cụ thể
-   (VD đúng: "Em là {sender_name} bên shop..."; VD sai: "Em là Huy bên shop...").
-4. Chào NGƯỜI NHẬN dùng placeholder {name} (VD: "Chào {name}, ...").
-5. Các biến thể phải khác nhau rõ rệt về góc tiếp cận (không paraphrase nhẹ).
-6. Không dùng ký tự trang trí quá đà, tối đa 2 emoji mỗi tin.`;
+QUY TẮC NỘI DUNG CỦA CAMPAIGN (phải tuân thủ):
+${rules}
+
+Chỉ trả về JSON hợp lệ, không markdown: {"variations": ["...", "..."]}.
+Các biến thể phải khác nhau rõ về góc tiếp cận; không tự thêm tên thật, giá hoặc tuyên bố không có trong đầu vào.`;
 }
 
-export default function CampaignAIScriptDialog({ senderName: initialSender, zaloId, channel, onApply, onClose }: CampaignAIScriptDialogProps) {
+export default function CampaignAIScriptDialog({ senderName: initialSender, zaloId, channel, initialRulesSnapshot, onApply, onClose }: CampaignAIScriptDialogProps) {
   const { showNotification, setView } = useAppStore();
   const [product, setProduct] = useState('');
   const [goal, setGoal] = useState(GOALS[0].value);
   const [tone, setTone] = useState(TONES[0].value);
+  const [campaignRules, setCampaignRules] = useState(initialCampaignRules(initialRulesSnapshot));
+  const [commonRules, setCommonRules] = useState(initialCommonRules(initialRulesSnapshot)?.text || COMMON_SCRIPT_RULES);
+  const [savedCommonRules, setSavedCommonRules] = useState(initialCommonRules(initialRulesSnapshot)?.text || COMMON_SCRIPT_RULES);
+  const [commonRulesVersion, setCommonRulesVersion] = useState(initialCommonRules(initialRulesSnapshot)?.version || 0);
+  const [savingCommonRules, setSavingCommonRules] = useState(false);
+  const rulesSnapshot = `Quy tắc chung v${commonRulesVersion}:\n${commonRules.trim()}${CAMPAIGN_RULES_MARKER}${campaignRules.trim()}`;
   // 3-5 biến thể để xoay vòng (random) khi gửi — tránh spam do trùng nội dung
   const [count, setCount] = useState(3);
   const [senderName, setSenderName] = useState(initialSender);
@@ -96,6 +132,16 @@ export default function CampaignAIScriptDialog({ senderName: initialSender, zalo
   const productRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
+    if (!initialRulesSnapshot) return;
+    const savedCommon = initialCommonRules(initialRulesSnapshot);
+    if (!savedCommon) return;
+    setCampaignRules(initialCampaignRules(initialRulesSnapshot));
+    setCommonRules(savedCommon.text);
+    setSavedCommonRules(savedCommon.text);
+    setCommonRulesVersion(savedCommon.version);
+  }, [initialRulesSnapshot]);
+
+  useEffect(() => {
     (async () => {
       try {
         const defRes = await DataAccessor.getDefaultAssistant();
@@ -104,6 +150,15 @@ export default function CampaignAIScriptDialog({ senderName: initialSender, zalo
         if (listRes?.success) {
           setAssistants(listRes.assistants || []);
           if (!defRes?.assistant && listRes.assistants.length > 0) setSelectedAssistantId(listRes.assistants[0].id);
+        }
+        if (!initialRulesSnapshot && zaloId) {
+          const ruleRes = await DataAccessor.getCRMCommonScriptRules({ zaloId });
+          const savedRules = ruleRes?.rules || (ruleRes as any)?.data;
+          if (ruleRes?.success && savedRules?.rules_text) {
+            setCommonRules(savedRules.rules_text);
+            setSavedCommonRules(savedRules.rules_text);
+            setCommonRulesVersion(savedRules.version || 0);
+          }
         }
       } catch { /* ignore */ }
     })();
@@ -128,7 +183,7 @@ export default function CampaignAIScriptDialog({ senderName: initialSender, zalo
       ].join('\n');
       const res = await ipc.ai?.chat(
         selectedAssistantId,
-        [{ role: 'system', content: buildSystemPrompt(count) }, { role: 'user', content: userMsg }],
+        [{ role: 'system', content: buildSystemPrompt(count, rulesSnapshot) }, { role: 'user', content: userMsg }],
         false,
         8000,
         zaloId || undefined,
@@ -151,18 +206,40 @@ export default function CampaignAIScriptDialog({ senderName: initialSender, zalo
     }
   };
 
-  const previewOf = (text: string) =>
-    (text || '').replace(/\{sender_name\}/g, senderName.trim() || '{sender_name}').replace(/\{name\}/g, 'Nguyễn Văn A');
+  const selectedIssues = variations.flatMap((text, index) => picked[index]
+    ? validateCampaignVariation(text).map(issue => `Biến thể ${index + 1}: ${issue}`)
+    : []);
 
   const handleApply = () => {
     const chosen = variations.filter((_, i) => picked[i]);
-    if (!chosen.length) return;
-    onApply(chosen);
+    if (!chosen.length || selectedIssues.length) return;
+    onApply(chosen, rulesSnapshot.trim(), commonRulesVersion);
     showNotification(`Đã thêm ${chosen.length} biến thể từ AI`, 'success');
     onClose();
   };
 
-  const canGenerate = product.trim().length > 0 && selectedAssistantId && !loading;
+  const handleSaveCommonRules = async () => {
+    if (!zaloId || !commonRules.trim() || savingCommonRules) return;
+    setSavingCommonRules(true);
+    try {
+      const res = await DataAccessor.saveCRMCommonScriptRules({ zaloId, rulesText: commonRules.trim() });
+      const savedRules = res?.rules || (res as any)?.data;
+      if (!res?.success || !savedRules?.version) {
+        setError(res?.error || 'Không lưu được bộ quy tắc chung');
+        return;
+      }
+      setCommonRulesVersion(savedRules.version);
+      setSavedCommonRules(savedRules.rules_text);
+      setVariations([]);
+      setPicked([]);
+      showNotification(`Đã lưu bộ quy tắc chung phiên bản ${savedRules.version}`, 'success');
+    } catch (err: any) {
+      setError(err?.message || 'Không lưu được bộ quy tắc chung');
+    } finally { setSavingCommonRules(false); }
+  };
+
+  const canGenerate = product.trim().length > 0 && selectedAssistantId && commonRules.trim().length > 0 &&
+    commonRules.trim() === savedCommonRules.trim() && !loading;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
@@ -234,6 +311,23 @@ export default function CampaignAIScriptDialog({ senderName: initialSender, zalo
           </div>
 
           <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-gray-400 text-xs font-medium">Quy tắc chung v{commonRulesVersion}</label>
+              <button type="button" onClick={handleSaveCommonRules} disabled={!zaloId || !commonRules.trim() || savingCommonRules}
+                className="px-2 py-1 rounded-md border border-violet-500/40 text-[10px] text-violet-300 hover:bg-violet-500/10 disabled:opacity-40">
+                {savingCommonRules ? 'Đang lưu...' : 'Lưu phiên bản chung mới'}
+              </button>
+            </div>
+            <textarea value={commonRules} onChange={(e) => setCommonRules(e.target.value)} rows={5}
+              className="w-full bg-gray-900 border border-gray-600 rounded-xl px-3 py-2.5 text-xs text-gray-200 focus:outline-none focus:border-violet-500 resize-y" />
+            {commonRules.trim() !== savedCommonRules.trim() && <p className="text-[10px] text-amber-300 mt-1">Lưu phiên bản quy tắc chung mới trước khi sinh kịch bản.</p>}
+            <label className="text-gray-400 text-xs font-medium mb-1.5 mt-3 block">Quy tắc bổ sung cho campaign</label>
+            <textarea value={campaignRules} onChange={(e) => setCampaignRules(e.target.value)} rows={3}
+              className="w-full bg-gray-900 border border-gray-600 rounded-xl px-3 py-2.5 text-xs text-gray-200 focus:outline-none focus:border-violet-500 resize-y" />
+            <p className="text-[10px] text-gray-500 mt-1">Bản quy tắc được lưu cùng dữ liệu đo lường kịch bản trong CRM.</p>
+          </div>
+
+          <div>
             <label className="text-gray-400 text-xs font-medium mb-1.5 block">Tên người gửi (để preview)</label>
             <input value={senderName} onChange={(e) => setSenderName(e.target.value)}
               placeholder="Tên nick Zalo gửi..."
@@ -268,7 +362,11 @@ export default function CampaignAIScriptDialog({ senderName: initialSender, zalo
                     className="mt-1 flex-shrink-0 accent-violet-500" />
                   <div className="min-w-0">
                     <p className="text-[10px] text-violet-400 font-semibold mb-1">Biến thể {i + 1} (preview: {senderName.trim() || '...'} gửi)</p>
-                    <p className="text-xs text-gray-200 leading-relaxed whitespace-pre-wrap break-words">{previewOf(v)}</p>
+                    <textarea value={v} onChange={(e) => setVariations(prev => prev.map((text, j) => j === i ? e.target.value : text))}
+                      rows={Math.min(6, Math.max(3, Math.ceil(v.length / 100)))}
+                      className="w-full bg-gray-900/70 border border-gray-700 rounded-lg p-2 text-xs text-gray-200 leading-relaxed whitespace-pre-wrap break-words focus:outline-none focus:border-violet-500 resize-y"
+                      onClick={(e) => e.stopPropagation()} />
+                    {validateCampaignVariation(v).map(issue => <p key={issue} className="text-[10px] text-amber-400 mt-1">{issue}</p>)}
                     <p className="text-[10px] text-gray-500 font-mono mt-1.5 break-words">{v}</p>
                   </div>
                 </label>
@@ -291,7 +389,7 @@ export default function CampaignAIScriptDialog({ senderName: initialSender, zalo
             </button>
           )}
           {variations.length > 0 ? (
-            <button onClick={handleApply} disabled={!picked.some(Boolean)}
+            <button onClick={handleApply} disabled={!picked.some(Boolean) || selectedIssues.length > 0}
               className="px-5 py-2 rounded-xl bg-violet-600 text-white text-sm hover:bg-violet-700 disabled:opacity-40 transition-colors font-semibold">
               Thêm {picked.filter(Boolean).length} biến thể
             </button>

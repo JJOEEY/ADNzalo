@@ -65,6 +65,35 @@ export interface CRMCampaignContact {
     friend_request_message?: string;
 }
 
+export interface CRMCampaignScriptVariantInput {
+    id: string;
+    label: string;
+    snapshot: string;
+}
+
+export interface CRMCampaignScriptExperimentInput {
+    rulesVersion: number;
+    rulesSnapshot: string;
+    active: boolean;
+    variants: CRMCampaignScriptVariantInput[];
+}
+
+export interface CRMCampaignScriptReportRow {
+    campaign_id: number;
+    campaign_name: string;
+    experiment_revision: number;
+    rules_version: number;
+    variant_id: string;
+    variant_label: string;
+    rules_snapshot: string;
+    sample_size: number;
+    sent: number;
+    replied: number;
+    consulting: number;
+    closed: number;
+    revenue: number;
+}
+
 export interface CRMSendLog {
     id?: number;
     owner_zalo_id: string;
@@ -123,6 +152,8 @@ export interface ClientPoolEntry {
     /** employee_id nhân viên phụ trách ('' = chưa gán) */
     owner_employee?: string;
     deal_value?: number;
+    /** Campaign selected by the operator as the source of a closed sale. */
+    attributed_campaign_id?: number | null;
     created_at?: number;
     updated_at?: number;
     // Join sẵn để hiển thị (không lưu DB)

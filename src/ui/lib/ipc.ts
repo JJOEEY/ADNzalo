@@ -238,10 +238,14 @@ declare global {
         getContacts: (params: { zaloId: string; opts?: any }) => Promise<{ success: boolean; contacts: any[]; total: number }>;
         getContactStats: (params: { zaloId: string }) => Promise<{ success: boolean; total: number; friendCount: number; noteCount: number }>;
         getCampaigns: (params: { zaloId: string }) => Promise<{ success: boolean; campaigns: any[] }>;
+        getScriptRules: (params: { zaloId: string }) => Promise<{ success: boolean; rules?: { version: number; rules_text: string; created_at: number } }>;
+        saveScriptRules: (params: { zaloId: string; rulesText: string }) => Promise<{ success: boolean; rules?: { version: number; rules_text: string; created_at: number }; error?: string }>;
+        getScriptExperiment: (params: { zaloId: string; campaignId: number }) => Promise<{ success: boolean; experiment?: any; error?: string }>;
+        saveScriptExperiment: (params: { zaloId: string; campaignId: number; experiment: any }) => Promise<{ success: boolean; revision?: number; error?: string }>;
         saveCampaign: (params: { zaloId: string; campaign: any }) => Promise<{ success: boolean; id: number; error?: string }>;
         deleteCampaign: (params: { zaloId: string; campaignId: number }) => Promise<{ success: boolean }>;
         cloneCampaign: (params: { zaloId: string; campaignId: number; includeContacts: boolean; newName?: string }) => Promise<{ success: boolean; id: number; error?: string }>;
-        updateCampaignStatus: (params: { campaignId: number; status: string }) => Promise<{ success: boolean }>;
+        updateCampaignStatus: (params: { campaignId: number; status: string }) => Promise<{ success: boolean; error?: string }>;
         addCampaignContacts: (params: { zaloId: string; campaignId: number; contacts: any[] }) => Promise<{ success: boolean; error?: string }>;
         getCampaignContacts: (params: { campaignId: number }) => Promise<{ success: boolean; contacts: any[] }>;
         deleteCampaignContacts: (params: { campaignId: number; contactIds: string[] }) => Promise<{ success: boolean }>;
@@ -282,6 +286,13 @@ declare global {
             id: number; name: string; type: string; status: string; created_at: number;
             total: number; sent: number; failed: number; pending: number; replied: number;
             deliveryRate: number; replyRate: number;
+          }>;
+        }>;
+        campaignVariantReport: (params: { zaloId: string }) => Promise<{
+          success: boolean; data: Array<{
+            campaign_id: number; campaign_name: string; rules_version: number;
+            variant_id: string; variant_label: string; rules_snapshot: string; sample_size: number;
+            sent: number; replied: number; consulting: number; closed: number; revenue: number;
           }>;
         }>;
         friendRequests: (params: { zaloId: string; sinceTs: number; untilTs: number }) => Promise<{

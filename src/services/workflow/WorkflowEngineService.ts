@@ -90,6 +90,7 @@ export interface Workflow {
   id: string;
   name: string;
   description?: string;
+  disabledReason?: string;
   enabled: boolean;
   channel: WorkflowChannel;
   /** @deprecated use pageIds */
@@ -177,8 +178,18 @@ class WorkflowEngineService {
   }
 
   private isRunnableWorkflow(wf: Workflow): boolean {
+    if (this.getRemovedCommerceWorkflowNode(wf)) return false;
     const ch = this.normalizeWorkflowChannel(wf.channel);
     return ch === 'zalo' || ch === 'facebook' || ch === 'telegram_user' || ch === 'telegram_bot';
+  }
+
+  private getRemovedCommerceWorkflowNode(wf: Workflow): string | null {
+    const prefixes = ['kiotviet.', 'haravan.', 'sapo.', 'nhanh.', 'pancake.', 'payment.', 'ghn.', 'ghtk.'];
+    const node = (wf.nodes || []).find(item => {
+      const type = String(item?.type || '').toLowerCase();
+      return type === 'trigger.payment' || prefixes.some(prefix => type.startsWith(prefix));
+    });
+    return node ? String(node.type || 'commerce') : null;
   }
 
   /**
@@ -210,6 +221,7 @@ class WorkflowEngineService {
         const pageIdsRaw: string = row.page_ids || row.page_id || '';
         const wf: Workflow = {
           id: row.id, name: row.name, description: row.description || '',
+          disabledReason: row.disabled_reason || '',
           enabled: row.enabled === 1 || row.enabled === true,
           channel: this.normalizeWorkflowChannel(row.channel),
           pageId: pageIdsRaw.split(',').filter(Boolean)[0] || '',
@@ -232,6 +244,7 @@ class WorkflowEngineService {
       const pageIdsRaw: string = row.page_ids || row.page_id || '';
       const wf: Workflow = {
         id: row.id, name: row.name, description: row.description || '',
+        disabledReason: row.disabled_reason || '',
         enabled: row.enabled === 1 || row.enabled === true,
         channel: this.normalizeWorkflowChannel(row.channel),
         pageId: pageIdsRaw.split(',').filter(Boolean)[0] || '',
@@ -918,6 +931,10 @@ class WorkflowEngineService {
     triggerData: any,
     triggeredBy: string = 'manual'
   ): Promise<WorkflowRunLog> {
+    const removedCommerceNode = this.getRemovedCommerceWorkflowNode(wf);
+    if (removedCommerceNode) {
+      throw new Error(`Workflow còn node commerce đã gỡ (${removedCommerceNode}). Hãy xóa node này trước khi chạy.`);
+    }
     if (!this.isRunnableWorkflow(wf)) {
       throw new Error('Workflow không hỗ trợ chạy (channel unknown)');
     }

@@ -28,8 +28,22 @@ const nodeTypes = {
   integration: IntegrationNode,
 };
 
-// Merge templates: giữ nguyên template cũ + thêm template tích hợp mới
-const ALL_TEMPLATES = [...WORKFLOW_TEMPLATES, ...INTEGRATION_TEMPLATES];
+const REMOVED_COMMERCE_NODE_PREFIXES = [
+  'kiotviet.', 'haravan.', 'sapo.', 'nhanh.', 'pancake.', 'payment.', 'ghn.', 'ghtk.',
+];
+
+function usesRemovedCommerceNode(template: WorkflowTemplate): boolean {
+  return template.nodes.some(node => {
+    const type = String(node.type || '').toLowerCase();
+    return type === 'trigger.payment' || REMOVED_COMMERCE_NODE_PREFIXES.some(prefix => type.startsWith(prefix));
+  });
+}
+
+// Preserve generic HTTP/webhook/Telegram examples while hiding templates that
+// depend on commerce providers that can no longer be configured or run.
+const ALL_TEMPLATES = [...WORKFLOW_TEMPLATES, ...INTEGRATION_TEMPLATES].filter(
+  template => !usesRemovedCommerceNode(template),
+);
 
 interface PageAccount {
   zalo_id: string;

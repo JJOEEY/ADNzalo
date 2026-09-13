@@ -1159,10 +1159,6 @@ app.whenReady().then(async () => {
   // Initialize Integration Registry
   setTimeout(() => {
     IntegrationRegistry.initialize();
-    // Bridge integration:payment events → workflow trigger.payment
-    EventBroadcaster.onBeforeSend('integration:payment', (data: any) => {
-      WorkflowEngineService.getInstance()['triggerWorkflows']('trigger.payment', data);
-    });
   }, 2500);
   // Initialize Webhook Gateway (port 9889)
   setTimeout(() => {

@@ -34,7 +34,7 @@ const integrationTabs: IntegrationTab[] = [
         icon: '🤖', name: 'OpenAI (ChatGPT)',
         color: 'bg-green-50 border-green-200 text-green-700', dot: 'bg-green-500',
         desc: 'AI phổ biến và mạnh mẽ nhất thế giới',
-        features: [' AI Assistant tự động trả lời chat', 'Phân loại tin nhắn bằng AI', 'Gợi ý câu trả lời thông minh', 'Nạp file kiến thức & sản phẩm', 'Tích hợp dữ liệu POS vào prompt'],
+        features: ['AI Assistant tự động trả lời chat', 'Phân loại tin nhắn bằng AI', 'Gợi ý câu trả lời thông minh', 'Nạp file kiến thức', 'Cá nhân hóa câu trả lời theo hội thoại'],
         featuredInAll: true,
       },
       {
@@ -148,6 +148,8 @@ const integrationTabs: IntegrationTab[] = [
   },
 ];
 
+const availableIntegrationTabs = integrationTabs.filter(tab => tab.key === 'ai');
+
 const allIntegrationTab: IntegrationTab = {
   key: 'all',
   icon: '✨',
@@ -155,32 +157,27 @@ const allIntegrationTab: IntegrationTab = {
   color: 'from-violet-500 to-fuchsia-500',
   glow: 'rgba(168,85,247,0.25)',
   activeColor: 'bg-slate-900 border-slate-900 text-white',
-  platforms: integrationTabs.flatMap(tab => {
+  platforms: availableIntegrationTabs.flatMap(tab => {
     const featuredPlatforms = tab.platforms.filter(platform => platform.featuredInAll);
     return featuredPlatforms.length > 0 ? featuredPlatforms : tab.platforms.slice(0, 1);
   }),
 };
 
-const integrationTabOptions: IntegrationTab[] = [allIntegrationTab, ...integrationTabs];
+const integrationTabOptions: IntegrationTab[] = [allIntegrationTab, ...availableIntegrationTabs];
 
 // ─── Integration workflow templates ───────────────────────────────────────────
 const integrationCategories = [
   { key: 'ai',       icon: '🤖', label: 'AI',        color: 'from-cyan-500 to-blue-600' },
-  { key: 'payment',  icon: '⚡', label: 'Thanh toán', color: 'from-violet-500 to-purple-600' },
-  { key: 'order',    icon: '🛒', label: 'Đơn hàng',   color: 'from-orange-500 to-amber-500' },
-  { key: 'shipping', icon: '🚚', label: 'Vận chuyển',  color: 'from-rose-500 to-red-600' },
-  { key: 'customer', icon: '👤', label: 'Khách hàng',  color: 'from-blue-500 to-cyan-500' },
-  { key: 'data',     icon: '📊', label: 'Dữ liệu',     color: 'from-emerald-500 to-teal-500' },
 ];
 
 const integrationTemplates = [
   // ── AI ──
   {
-    icon: '🤖', title: ' AI Assistant tư vấn bán hàng tự động',
-    desc: 'Khách nhắn tin → AI phân tích ngữ cảnh, tra sản phẩm/đơn hàng trên POS, soạn câu trả lời chuyên nghiệp, gửi tự động qua Zalo.',
+    icon: '🤖', title: 'AI Assistant hỗ trợ hội thoại',
+    desc: 'Khách nhắn tin → AI phân tích nội dung, dùng kho kiến thức đã nạp để soạn câu trả lời phù hợp và gửi qua Zalo.',
     category: 'ai', difficulty: 'easy' as const, featured: true,
     platforms: ['OpenAI / Gemini', 'Zalo'],
-    steps: ['Tin nhắn mới', 'AI phân tích', 'Tra dữ liệu POS', 'Gửi trả lời'],
+    steps: ['Tin nhắn mới', 'AI phân tích', 'Tra kho kiến thức', 'Gửi trả lời'],
   },
   {
     icon: '🏷️', title: 'AI phân loại tin nhắn → Phân nhánh xử lý',
@@ -329,6 +326,8 @@ const integrationTemplates = [
   },
 ];
 
+const availableIntegrationTemplates = integrationTemplates.filter(template => template.category === 'ai');
+
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 const difficultyLabel: Record<string, { text: string; cls: string }> = {
   easy:     { text: 'Dễ',         cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
@@ -367,8 +366,8 @@ export default function IntegrationShowcase() {
   const currentTab = integrationTabOptions.find(t => t.key === activeTab) || allIntegrationTab;
 
   const filteredTemplates = activeTemplateCategory
-    ? integrationTemplates.filter(t => t.category === activeTemplateCategory)
-    : integrationTemplates.filter(t => t.featured);
+    ? availableIntegrationTemplates.filter(t => t.category === activeTemplateCategory)
+    : availableIntegrationTemplates.filter(t => t.featured);
 
   return (
     <section id="integration" className="orbit-shell py-28 px-6 relative overflow-hidden">
@@ -391,20 +390,20 @@ export default function IntegrationShowcase() {
               🔌 Kết nối & tích hợp
             </div>
             <h2 className="text-4xl md:text-5xl font-black tracking-tight text-slate-950 mb-4 aos-element delay-1">
-              Tra đơn, tạo vận đơn, xác nhận thanh toán,  AI Assistant hỗ trợ ngay trong <span className="gradient-text">luồng chat</span>
+              AI Assistant hỗ trợ đội ngũ ngay trong <span className="gradient-text">luồng chat</span>
             </h2>
             <p className="text-slate-600 text-lg max-w-2xl leading-relaxed aos-element delay-2">
-              ADNZalo kết nối trực tiếp với POS, vận chuyển, thanh toán và AI Assistant để đội vận hành không phải nhảy qua lại giữa nhiều phần mềm khác nhau.
+              ADNZalo kết hợp trợ lý AI, workflow, kho kiến thức và công cụ kết nối ngoài để đội ngũ xử lý hội thoại có quy trình hơn.
             </p>
           </div>
 
           <div className="editorial-band aos-element delay-2 p-6 md:p-7">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {[
-                { value: '13', label: 'nền tảng' },
-                { value: '4', label: 'nhóm tích hợp' },
-                { value: '4', label: 'AI platform' },
-                { value: '24/7', label: 'webhook realtime' },
+                { value: 'AI', label: 'trợ lý hội thoại' },
+                { value: '24/7', label: 'workflow nền' },
+                { value: 'API', label: 'kết nối mở' },
+                { value: 'KB', label: 'kho kiến thức' },
               ].map((item) => (
                 <div key={item.label}>
                   <div className="text-3xl font-black">{item.value}</div>
@@ -456,7 +455,7 @@ export default function IntegrationShowcase() {
                     { icon: '🏷️', label: 'Phân loại tin nhắn theo ý định' },
                     { icon: '💡', label: 'Gợi ý câu trả lời trong khung soạn' },
                     { icon: '📄', label: 'Nạp file kiến thức (PDF, Excel, TXT)' },
-                    { icon: '🛒', label: 'Kết nối dữ liệu POS vào prompt' },
+                    { icon: '📚', label: 'Dùng nội dung từ kho kiến thức' },
                     { icon: '⚡', label: '4 nền tảng AI, 20+ model tùy chọn' },
                     { icon: '👥', label: 'Đa trợ lý, gán riêng mỗi tài khoản' },
                     { icon: '📊', label: 'Thống kê token & chi phí theo ngày' },
@@ -529,10 +528,10 @@ export default function IntegrationShowcase() {
 
         <div className="grid grid-cols-4 gap-4 mb-16 aos-element delay-3">
           {[
-            { value: '13',   label: 'Nền tảng hỗ trợ', icon: '🔌' },
-            { value: '4',    label: 'Nhóm tích hợp',   icon: '📦' },
-            { value: '4',    label: 'Nền tảng AI',      icon: '🤖' },
-            { value: '24/7', label: 'Webhook tự động',  icon: '⚡' },
+            { value: 'AI',   label: 'Trợ lý hội thoại', icon: '🤖' },
+            { value: '24/7', label: 'Workflow nền',      icon: '⚡' },
+            { value: 'HTTP', label: 'API bên ngoài',     icon: '🔌' },
+            { value: 'KB',   label: 'Kho kiến thức',     icon: '📚' },
           ].map(stat => (
             <div key={stat.label} className="planet-card rounded-2xl p-4 text-center">
               <div className="text-xl mb-1">{stat.icon}</div>
@@ -566,10 +565,10 @@ export default function IntegrationShowcase() {
               }`}
             >
               ⭐ Nổi bật
-              <span className="ml-1.5 text-[10px] opacity-60">({integrationTemplates.filter(t => t.featured).length})</span>
+              <span className="ml-1.5 text-[10px] opacity-60">({availableIntegrationTemplates.filter(t => t.featured).length})</span>
             </button>
             {integrationCategories.map(cat => {
-              const count = integrationTemplates.filter(t => t.category === cat.key).length;
+              const count = availableIntegrationTemplates.filter(t => t.category === cat.key).length;
               return (
                 <button
                   key={cat.key}

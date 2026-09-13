@@ -1405,6 +1405,12 @@ class HttpRelayService {
             if (method === 'GET' && pathname === '/api/query/crm/campaigns') {
                 return this.json(res, 200, restHandlers.getCRMCampaigns(employee, params));
             }
+            if (method === 'GET' && pathname === '/api/query/crm/script-rules') {
+                return this.json(res, 200, restHandlers.getCRMCommonScriptRules(employee, params));
+            }
+            if (method === 'GET' && pathname === '/api/query/crm/campaign-script-experiment') {
+                return this.json(res, 200, restHandlers.getCRMCampaignScriptExperiment(employee, params));
+            }
             if (method === 'GET' && pathname === '/api/query/crm/client-pool') {
                 return this.json(res, 200, restHandlers.getClientPool(employee, params));
             }
@@ -1470,6 +1476,9 @@ class HttpRelayService {
             }
             if (method === 'GET' && pathname === '/api/query/analytics/campaign-comparison') {
                 return this.json(res, 200, restHandlers.getCampaignComparison(employee, params));
+            }
+            if (method === 'GET' && pathname === '/api/query/analytics/campaign-variant-report') {
+                return this.json(res, 200, restHandlers.getCampaignVariantReport(employee, params));
             }
             if (method === 'GET' && pathname === '/api/query/analytics/friend-requests') {
                 return this.json(res, 200, restHandlers.getFriendRequestAnalytics(employee, params));
@@ -1870,6 +1879,7 @@ class HttpRelayService {
             // ── Client Pool ──
             if (pathname === '/api/command/crm/client-pool') {
                 const id = db.upsertClientPoolEntry({ ...params.entry, owner_zalo_id: zaloId });
+                if (!id) return { success: false, error: 'Không thể lưu kết quả. Hãy chọn campaign hợp lệ để ghi nhận sale.' };
                 EventBroadcaster.emit('crm:clientPoolChanged', { action: 'save', ownerZaloId: zaloId, id });
                 return { success: true, data: { id } };
             }
@@ -1887,6 +1897,7 @@ class HttpRelayService {
             // ── CRM Campaigns ──
             if (pathname === '/api/command/crm/campaigns') {
                 const id = db.saveCRMCampaign({ ...params.campaign, owner_zalo_id: zaloId });
+                if (!id) return { success: false, error: 'Không thể lưu campaign.' };
                 EventBroadcaster.emit('crm:campaignChanged', { action: 'save', ownerZaloId: zaloId, id, campaign: params.campaign });
                 return { success: true, data: { id } };
             }
@@ -2093,12 +2104,27 @@ class HttpRelayService {
             }
 
             // ── CRM — cloneCampaign, updateStatus, addContacts ──
+            if (pathname === '/api/command/crm/script-rules' && _method === 'POST') {
+                const rules = db.saveCRMCommonScriptRules(zaloId, String(params.rulesText || ''));
+                if (!rules) return { success: false, error: 'Quy tắc không được để trống và tối đa 10.000 ký tự.' };
+                return { success: true, data: rules };
+            }
+            if (pathname === '/api/command/crm/campaign-script-experiment' && _method === 'POST') {
+                const result = restHandlers.saveCRMCampaignScriptExperiment(employee, { ...params, zaloId });
+                if (result.success) {
+                    EventBroadcaster.emit('crm:campaignChanged', {
+                        action: 'scriptExperiment', ownerZaloId: zaloId, campaignId: Number(params.campaignId || 0),
+                    });
+                }
+                return result;
+            }
             if (pathname === '/api/command/crm/campaigns/clone') {                const id = db.cloneCRMCampaign(parseInt(params.campaignId) || 0, zaloId, params.includeContacts, params.newName);
                 EventBroadcaster.emit('crm:campaignChanged', { action: 'clone', ownerZaloId: zaloId, campaignId: id });
                 return { success: true, data: { id } };
             }
             if (pathname === '/api/command/crm/campaigns/status') {
-                db.updateCRMCampaignStatus(parseInt(params.campaignId) || 0, params.status);
+                const updated = db.updateCRMCampaignStatus(parseInt(params.campaignId) || 0, params.status);
+                if (!updated) return { success: false, error: 'Không thể cập nhật trạng thái chiến dịch.' };
                 EventBroadcaster.emit('crm:campaignChanged', { action: 'status', ownerZaloId: zaloId, campaignId: parseInt(params.campaignId) || 0, status: params.status });
                 return { success: true };
             }
@@ -2222,7 +2248,12 @@ class HttpRelayService {
             // ── Workflow CRUD ──
             if (pathname === '/api/command/workflows') {
                 try {
-                    db.saveWorkflow(params.workflow || params);
+                    const workflow = params.workflow || params;
+                    db.saveWorkflow(workflow);
+                    const savedWorkflow = db.getWorkflowById(workflow.id);
+                    if (workflow.enabled && !savedWorkflow?.enabled) {
+                        return { success: false, error: savedWorkflow?.disabled_reason || 'Hãy xóa các node commerce đã gỡ trước khi bật workflow.' };
+                    }
                 } catch (wfErr: any) {
                     return { success: false, error: wfErr.message };
                 }
@@ -2231,7 +2262,8 @@ class HttpRelayService {
             }
             if (pathname.match(/^\/api\/command\/workflows\/[^/]+\/toggle$/)) {
                 const id = pathname.split('/')[3];
-                db.toggleWorkflow(id, params.enabled !== false);
+                const changed = db.toggleWorkflow(id, params.enabled !== false);
+                if (!changed) return { success: false, error: 'Hãy xóa các node commerce đã gỡ trước khi bật workflow.' };
                 return { success: true };
             }
             if (pathname.match(/^\/api\/command\/workflows\/[^/]+$/)) {
@@ -2241,21 +2273,21 @@ class HttpRelayService {
             }
 
             // ── Integration CRUD ──
-            if (pathname === '/api/command/integrations') {
+            if (pathname === '/api/command/integrations' && _method === 'POST') {
                 const { IntegrationRegistry } = require('../integrations/IntegrationRegistry');
-                const saved = IntegrationRegistry.getInstance().saveIntegration(params.integration || params);
+                const saved = IntegrationRegistry.saveConfig(params.integration || params);
                 return { success: true, data: saved };
             }
-            if (pathname.match(/^\/api\/command\/integrations\/[^/]+\/toggle$/)) {
+            if (pathname.match(/^\/api\/command\/integrations\/[^/]+\/toggle$/) && _method === 'PATCH') {
                 const id = pathname.split('/')[3];
                 const { IntegrationRegistry } = require('../integrations/IntegrationRegistry');
-                IntegrationRegistry.getInstance().toggleIntegration(id, params.enabled !== false);
+                IntegrationRegistry.toggleEnabled(id, params.enabled !== false);
                 return { success: true };
             }
-            if (pathname.match(/^\/api\/command\/integrations\/[^/]+$/)) {
+            if (pathname.match(/^\/api\/command\/integrations\/[^/]+$/) && _method === 'DELETE') {
                 const id = pathname.split('/').pop() || '';
                 const { IntegrationRegistry } = require('../integrations/IntegrationRegistry');
-                IntegrationRegistry.getInstance().deleteIntegration(id);
+                IntegrationRegistry.deleteConfig(id);
                 return { success: true };
             }
 

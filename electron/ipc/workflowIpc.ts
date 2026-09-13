@@ -26,6 +26,7 @@ function rowToWorkflow(r: any): Workflow {
     const pageIds = pageIdsRaw.split(',').filter(Boolean);
     return {
         id: r.id, name: r.name, description: r.description || '',
+        disabledReason: r.disabled_reason || '',
         enabled: r.enabled === 1 || r.enabled === true,
         channel: normalizeWorkflowChannel(r.channel),
         pageId: pageIds[0] || '',
@@ -133,6 +134,7 @@ export function registerWorkflowIpc(): void {
                 id: workflow.id || uuidv4(),
                 name: workflow.name || 'Workflow mới',
                 description: workflow.description || '',
+                disabledReason: workflow.disabledReason || '',
                 enabled: workflow.enabled ?? true,
                 channel,
                 pageId: pageIds[0] || '',
@@ -150,6 +152,10 @@ export function registerWorkflowIpc(): void {
             Logger.log(`[WorkflowIpc] Saving workflow id=${wf.id} name="${wf.name}" nodes=${wf.nodes.length} edges=${wf.edges.length} channel=${channel}`);
             DatabaseService.getInstance().saveWorkflow(wf);
             DatabaseService.getInstance().save();
+            const savedWorkflow = DatabaseService.getInstance().getWorkflowById(wf.id);
+            if (wf.enabled && !savedWorkflow?.enabled) {
+                return { success: false, error: savedWorkflow?.disabled_reason || 'Hãy xóa các node commerce đã gỡ trước khi bật workflow.' };
+            }
             WorkflowEngineService.getInstance().reloadWorkflow(wf.id);
             return { success: true, id: wf.id, webhookToken };
         } catch (e: any) {
@@ -179,7 +185,8 @@ export function registerWorkflowIpc(): void {
                 const wf = rowToWorkflow(row);
                 // FB workflows are now supported - no channel check needed
             }
-            DatabaseService.getInstance().toggleWorkflow(id, enabled);
+            const changed = DatabaseService.getInstance().toggleWorkflow(id, enabled);
+            if (!changed) return { success: false, error: 'Hãy xóa các node commerce đã gỡ trước khi bật workflow.' };
             DatabaseService.getInstance().save();
             WorkflowEngineService.getInstance().reloadWorkflow(id);
             return { success: true };

@@ -1,8 +1,8 @@
 /**
  * IntegrationQuickPanel - Side panel thao tác tích hợp nhanh
  * Hiển thị bên phải khung chat (giống ConversationInfo panel).
- * Cho phép tra cứu đơn, sản phẩm, vận chuyển, tạo đơn hàng... trực tiếp khi đang chat.
- * Nếu chưa cấu hình → hiện hướng dẫn + nút đi tới trang Tích hợp.
+ * Cho phép thao tác nhanh với các tích hợp đang kết nối trong lúc chat.
+ * Nếu chưa có tích hợp hỗ trợ → hiện hướng dẫn + nút đi tới trang Tích hợp.
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -269,6 +269,10 @@ const ACTIONS_BY_TYPE: Record<string, QuickActionDef[]> = {
       fields: [{ key: 'limit', label: 'Số giao dịch', placeholder: '10', type: 'number' }] },
   ],
 };
+
+const REMOVED_COMMERCE_TYPES = new Set([
+  'kiotviet', 'haravan', 'sapo', 'nhanh', 'pancake', 'casso', 'sepay', 'ghn', 'ghtk',
+]);
 
 // ─── DEV MODE - Fake data for UI testing ──────────────────────────────────────
 
@@ -1214,15 +1218,16 @@ export default function IntegrationQuickPanel({ onClose, contextPhone, contextNa
   // Load integrations
   useEffect(() => {
     if (DEV_MODE) {
-      setIntegrations(FAKE_INTEGRATIONS);
-      setSelectedIntegration(FAKE_INTEGRATIONS[0]);
+      const available = FAKE_INTEGRATIONS.filter(item => !REMOVED_COMMERCE_TYPES.has(item.type));
+      setIntegrations(available);
+      setSelectedIntegration(available[0] || null);
       setLoadingIntegrations(false);
       return;
     }
     DataAccessor.getIntegrations().then(res => {
       if (res?.success) {
         const all = res.integrations || [];
-        const connected = all.filter((i: any) => i.enabled && i.connectedAt);
+        const connected = all.filter((i: any) => i.enabled && i.connectedAt && !REMOVED_COMMERCE_TYPES.has(i.type));
         setIntegrations(connected);
         if (connected.length > 0) setSelectedIntegration(connected[0]);
       }
@@ -1373,7 +1378,7 @@ export default function IntegrationQuickPanel({ onClose, contextPhone, contextNa
             <div>
               <p className="text-sm font-semibold text-white">Tích hợp nhanh</p>
               <p className="text-[11px] text-gray-400">
-                {contextName ? <>Hội thoại: <span className="text-blue-400">{contextName}</span></> : 'Tra cứu đơn, sản phẩm, vận chuyển...'}
+                {contextName ? <>Hội thoại: <span className="text-blue-400">{contextName}</span></> : 'Thao tác với tích hợp đang kết nối'}
               </p>
             </div>
           </div>
@@ -1401,7 +1406,7 @@ export default function IntegrationQuickPanel({ onClose, contextPhone, contextNa
             <div className="w-16 h-16 rounded-2xl bg-gray-800 flex items-center justify-center mb-4"><PluginIcon className="w-8 h-8" /></div>
             <h3 className="text-base font-semibold text-white mb-2">Chưa có tích hợp nào được kết nối</h3>
             <p className="text-sm text-gray-400 max-w-sm mb-6 leading-relaxed">
-              Hãy kết nối ít nhất một nền tảng (KiotViet, Haravan, Nhanh, Sepay, GHN…) để sử dụng tính năng tra cứu nhanh tại đây.
+              Hiện chưa có tích hợp nào hỗ trợ thao tác nhanh tại đây. Bạn có thể xem các kết nối khả dụng trong trang Tích hợp.
             </p>
             <button
               onClick={goToIntegrationPage}

@@ -6,7 +6,7 @@ import { useEmployeeStore } from '@/store/employeeStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import IntegrationDetailPage from './IntegrationDetailPage';
 import AIAssistantPage from './AIAssistantPage';
-import { AlertIcon, BotIcon, BrainIcon, ChatIcon, CheckCircleIcon, CreditCardIcon, DollarIcon, GlobeIcon, LightningIcon, LockIcon, MenuIcon, PackageIcon, PinIcon, PluginIcon, RefreshIcon, RocketIcon, ShoppingCartIcon, ShuffleIcon, SparklesIcon, StoreIcon, TargetIcon, TruckIcon , CheckIcon } from '@/components/common/icons';
+import { AlertIcon, BotIcon, BrainIcon, ChatIcon, CheckIcon, GlobeIcon, LightningIcon, LockIcon, PinIcon, PluginIcon, RocketIcon, ShuffleIcon, SparklesIcon, TargetIcon } from '@/components/common/icons';
 
 // ─── Catalog definition ───────────────────────────────────────────────────────
 
@@ -21,22 +21,15 @@ interface CatalogItem {
   settingFields?: { key: string; label: string; type?: string; options?: { value: string; label: string }[] }[];
 }
 
-type TabKey = 'all' | 'pos' | 'payment' | 'shipping' | 'ai' | 'messaging';
+type TabKey = 'all' | 'ai' | 'messaging';
 
 const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'all',       label: 'Tất cả',            icon: <PinIcon className="w-4 h-4" /> },
-  { key: 'pos',       label: 'POS / Bán hàng',    icon: <ShoppingCartIcon className="w-4 h-4" /> },
-  { key: 'payment',   label: 'Thanh toán',        icon: <CreditCardIcon className="w-4 h-4" /> },
-  { key: 'shipping',  label: 'Vận chuyển',        icon: <PackageIcon className="w-4 h-4" /> },
   { key: 'messaging', label: 'Tin nhắn',          icon: <ChatIcon className="w-4 h-4" /> },
   { key: 'ai',        label: 'Trợ lý AI',         icon: <BotIcon className="w-4 h-4" /> },
 ];
 
 const SECTION_META: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
-  ai:        { label: 'Trợ lý AI',      icon: <BotIcon className="w-4 h-4" />, color: 'bg-amber-600' },
-  pos:       { label: 'POS / Bán hàng', icon: <ShoppingCartIcon className="w-4 h-4" />, color: 'bg-orange-500' },
-  payment:   { label: 'Thanh toán',     icon: <CreditCardIcon className="w-4 h-4" />, color: 'bg-green-600' },
-  shipping:  { label: 'Vận chuyển',     icon: <PackageIcon className="w-4 h-4" />, color: 'bg-red-500' },
   messaging: { label: 'Tin nhắn',       icon: <ChatIcon className="w-4 h-4" />, color: 'bg-blue-500' },
 };
 
@@ -63,105 +56,6 @@ const AI_PLATFORM_META: Record<string, { label: string; color: string; icon: Rea
 };
 
 const CATALOG: Record<string, CatalogItem[]> = {
-  pos: [
-    {
-      type: 'kiotviet', name: 'KiotViet', priority: 'p0',
-      icon: <ShoppingCartIcon className="w-4 h-4" />, color: 'bg-orange-500',
-      desc: 'Tra cứu đơn hàng, khách hàng ngay trong chat. Tạo đơn hàng từ workflow.',
-      credentialFields: [
-        { key: 'clientId',     label: 'Client ID',     placeholder: 'KiotViet client_id' },
-        { key: 'clientSecret', label: 'Client Secret', secret: true, placeholder: 'KiotViet client_secret' },
-        { key: 'retailerName', label: 'Tên gian hàng (Retailer)', placeholder: 'vd: myshop' },
-      ],
-      settingFields: [
-        { key: 'defaultBranchId', label: 'Branch ID mặc định (tùy chọn)' },
-      ],
-    },
-    {
-      type: 'haravan', name: 'Haravan', priority: 'p0',
-      icon: <StoreIcon className="w-4 h-4" />, color: 'bg-indigo-500',
-      desc: 'Nền tảng TMĐT Việt Nam. Tra cứu đơn hàng, khách hàng Haravan trong chat.',
-      credentialFields: [
-        { key: 'accessToken',   label: 'Access Token (khuyên dùng)', secret: true, placeholder: 'Haravan Access Token từ Custom App' },
-        { key: 'apiKey',        label: 'API Key (legacy)', placeholder: 'Bỏ trống nếu dùng Access Token' },
-        { key: 'password',      label: 'Password (legacy)', secret: true, placeholder: 'Bỏ trống nếu dùng Access Token' },
-        { key: 'retailerDomain', label: 'Tên shop (subdomain)', placeholder: 'vd: myshop hoặc myshop.myharavan.com' },
-      ],
-    },
-    {
-      type: 'sapo', name: 'Sapo', priority: 'p0',
-      icon: <CheckCircleIcon className="w-4 h-4" />, color: 'bg-emerald-500',
-      desc: 'Quản lý bán hàng đa kênh Sapo. Tra cứu đơn, khách hàng theo SĐT.',
-      credentialFields: [
-        { key: 'accessToken',  label: 'Access Token', secret: true, placeholder: 'Lấy từ SAPO Admin → Cài đặt → Phát triển → Quản lý API → Token' },
-        { key: 'storeDomain', label: 'Tên store (subdomain)', placeholder: 'vd: myshop (myshop.mysapo.net)' },
-      ],
-    },
-    {
-      type: 'nhanh', name: 'Nhanh.vn', priority: 'p0',
-      icon: <LightningIcon className="w-4 h-4" />, color: 'bg-yellow-600',
-      desc: 'Phần mềm bán hàng đa kênh Nhanh.vn. Quản lý đơn hàng, kho, khách hàng.',
-      credentialFields: [
-        { key: 'appId',       label: 'App ID',       placeholder: 'Nhanh.vn Open API App ID' },
-        { key: 'businessId',  label: 'Business ID',  placeholder: 'Nhanh.vn Business ID' },
-        { key: 'accessToken', label: 'Access Token v3', secret: true, placeholder: 'Lấy từ open.nhanh.vn → Ứng dụng của tôi' },
-      ],
-    },
-    {
-      type: 'pancake', name: 'Pancake POS', priority: 'p0',
-      icon: <MenuIcon className="w-4 h-4" />, color: 'bg-amber-500',
-      desc: 'Pancake POS/OMS. Tra cứu khách hàng, đơn hàng, sản phẩm và tạo đơn ngay trong chat.',
-      credentialFields: [
-        { key: 'accessToken', label: 'API Key (api_key)', secret: true, placeholder: 'Pancake Open API key' },
-        { key: 'shopId', label: 'Shop ID', placeholder: 'Mã shop Pancake' },
-      ],
-    },
-  ],
-  payment: [
-    {
-      type: 'casso', name: 'Casso', priority: 'p0',
-      icon: <CreditCardIcon className="w-4 h-4" />, color: 'bg-green-600',
-      desc: 'Nhận webhook khi có giao dịch chuyển khoản VietQR. Tự động xác nhận đơn.',
-      credentialFields: [
-        { key: 'apiKey',    label: 'API Key', secret: true, placeholder: 'Casso API Key' },
-        { key: 'secretKey', label: 'Secret Key (webhook)', secret: true, placeholder: 'Để trống nếu không dùng' },
-      ],
-    },
-    {
-      type: 'sepay', name: 'SePay', priority: 'p0',
-      icon: <DollarIcon className="w-4 h-4" />, color: 'bg-teal-600',
-      desc: 'Nhận webhook giao dịch từ SePay. Kích hoạt workflow tự động khi nhận tiền.',
-      credentialFields: [
-        { key: 'apiKey',          label: 'API Key', secret: true, placeholder: 'SePay API Key' },
-        { key: 'webhookSecretKey', label: 'Webhook Secret', secret: true, placeholder: 'Để trống nếu không cần' },
-      ],
-    },
-  ],
-  shipping: [
-    {
-      type: 'ghn', name: 'GHN Express', priority: 'p0',
-      icon: <PackageIcon className="w-4 h-4" />, color: 'bg-red-500',
-      desc: 'Tạo đơn, tra cứu vận đơn GHN. Khách hỏi tracking → tự động reply.',
-      credentialFields: [
-        { key: 'token',  label: 'Token GHN', secret: true, placeholder: 'GHN Token' },
-        { key: 'shopId', label: 'Shop ID',   placeholder: 'GHN Shop ID' },
-      ],
-      settingFields: [
-        { key: 'environment', label: 'Môi trường', type: 'select', options: [
-          { value: 'production', label: 'Production' },
-          { value: 'sandbox',    label: 'Sandbox (test)' },
-        ]},
-      ],
-    },
-    {
-      type: 'ghtk', name: 'GHTK', priority: 'p0',
-      icon: <TruckIcon className="w-4 h-4" />, color: 'bg-blue-500',
-      desc: 'Tạo đơn, tra cứu vận đơn GHTK. Tự động gửi cập nhật trạng thái đơn.',
-      credentialFields: [
-        { key: 'token', label: 'Token GHTK', secret: true, placeholder: 'GHTK API Token' },
-      ],
-    },
-  ],
   messaging: [
     {
       type: 'telegram_bot', name: 'Telegram Bot', priority: 'p0',
@@ -337,15 +231,12 @@ function AISection({ onNavigateAi }: { onNavigateAi: () => void }) {
   );
 }
 
-function TunnelStatusCard({ webhookPort, tunnelUrl, tunnelLoading, onToggle, savedList }: {
+function TunnelStatusCard({ webhookPort, tunnelUrl, tunnelLoading, onToggle }: {
   webhookPort: number;
   tunnelUrl: string | null;
   tunnelLoading: boolean;
   onToggle: () => void;
-  savedList: SavedIntegration[];
 }) {
-  const hasPaymentIntegration = savedList.some(s => (s.type === 'casso' || s.type === 'sepay') && s.connectedAt);
-
   return (
     <div className="bg-gray-700 dark:bg-gray-800 border border-gray-200 dark:border-gray-700/60 rounded-2xl p-5">
       {/* Header */}
@@ -355,8 +246,7 @@ function TunnelStatusCard({ webhookPort, tunnelUrl, tunnelLoading, onToggle, sav
             <span><GlobeIcon className="w-4 h-4" /></span> Webhook Tunnel - Kết nối Internet
           </h3>
           <p className="text-xs mt-1">
-            Tunnel expose server local ra internet để nhận webhook thanh toán,
-            tự động xác nhận đơn hàng, kích hoạt workflow từ bên ngoài.
+            Tạo URL công khai để hệ thống bên ngoài gửi webhook về và kích hoạt workflow.
           </p>
         </div>
         <button
@@ -403,44 +293,33 @@ function TunnelStatusCard({ webhookPort, tunnelUrl, tunnelLoading, onToggle, sav
       {/* Billing explanation - always visible */}
       <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
         <div className="bg-blue-50 dark:bg-blue-900 border border-blue-200 dark:border-blue-700/30 rounded-xl p-3">
-          <p className="text-xs font-semibold text-blue-700 dark:text-blue-300 mb-1"><CreditCardIcon className="w-4 h-4 inline" /> Khi nào cần bật Tunnel?</p>
+          <p className="text-xs font-semibold text-blue-700 dark:text-blue-300 mb-1"><GlobeIcon className="w-4 h-4 inline" /> Khi nào cần bật Tunnel?</p>
           <ul className="text-[11px] text-blue-600/80 dark:text-blue-200/80 space-y-1">
-            <li>• Dùng <strong>Casso</strong> hoặc <strong>SePay</strong> để nhận thông báo chuyển khoản tự động</li>
-            <li>• Hệ thống thanh toán <strong>cần server công khai</strong> để gửi webhook về</li>
-            <li>• Khi nhận được tiền → tự động xác nhận đơn, kích hoạt workflow</li>
-            <li>• <strong>Bắt buộc</strong> nếu muốn tự động hoá xác nhận thanh toán</li>
+            <li>• Dịch vụ bên ngoài cần gửi dữ liệu đến webhook của ADNzalo</li>
+            <li>• Bật Tunnel để dịch vụ đó truy cập được ứng dụng đang chạy trên máy</li>
+            <li>• Workflow có thể dùng dữ liệu webhook để bắt đầu xử lý</li>
           </ul>
         </div>
         <div className="bg-purple-50 dark:bg-purple-900 border border-purple-200 dark:border-purple-700/30 rounded-xl p-3">
           <p className="text-xs font-semibold text-purple-700 dark:text-purple-300 mb-1">🧪 Tunnel hoạt động thế nào?</p>
           <ul className="text-[11px] text-purple-600/80 dark:text-purple-200/80 space-y-1">
             <li>• Tạo một <strong>URL công khai</strong> (VD: abc.loca.lt) trỏ về máy bạn</li>
-            <li>• Casso/SePay gửi dữ liệu giao dịch đến URL này</li>
-            <li>• Phần mềm nhận được → cập nhật trạng thái đơn hàng</li>
-            <li>• Dùng <strong>miễn phí</strong>, không cần đăng ký tài khoản bên thứ ba</li>
+            <li>• Cấu hình URL này trong dịch vụ sẽ gửi webhook</li>
+            <li>• ADNzalo nhận dữ liệu và phát sự kiện webhook cho workflow</li>
+            <li>• Chỉ bật khi cần nhận webhook từ ngoài máy</li>
           </ul>
         </div>
       </div>
-
-      {/* Warning if no tunnel but has payment integration connected */}
-      {!tunnelUrl && hasPaymentIntegration && (
-        <div className="mt-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-700/40 rounded-xl px-4 py-3">
-          <p className="text-xs text-yellow-800 dark:text-yellow-400 font-medium mb-1"><AlertIcon className="w-4 h-4 inline" /> Bạn đang dùng Casso/SePay nhưng Tunnel chưa bật</p>
-          <p className="text-[11px] text-yellow-700 dark:text-yellow-500">
-            Thanh toán tự động sẽ không hoạt động. Hãy bật Tunnel ở nút bên trên để nhận webhook từ internet.
-          </p>
-        </div>
-      )}
 
       {/* How to use in billing flow */}
       {tunnelUrl && (
         <div className="mt-3 bg-green-50 dark:bg-green-900/15 border border-green-300 dark:border-green-700/30 rounded-xl px-4 py-3">
           <div className="flex items-center gap-2">
             <span className="text-green-600 dark:text-green-400"><CheckIcon className="w-4 h-4" /></span>
-            <p className="text-xs text-green-800 dark:text-green-300 font-medium">Tunnel đang hoạt động - sẵn sàng nhận webhook thanh toán</p>
+            <p className="text-xs text-green-800 dark:text-green-300 font-medium">Tunnel đang hoạt động - sẵn sàng nhận webhook từ bên ngoài</p>
           </div>
           <p className="text-[11px] text-green-700/70 dark:text-green-400/70 mt-1 ml-5">
-            Casso/SePay sẽ gửi thông báo giao dịch qua URL công khai bên trên. Khi có chuyển khoản, hệ thống tự động xử lý.
+            Dịch vụ bên ngoài có thể gửi dữ liệu đến URL công khai bên trên để kích hoạt workflow.
           </p>
         </div>
       )}
@@ -666,7 +545,6 @@ export default function IntegrationPage() {
                   tunnelUrl={tunnelUrl}
                   tunnelLoading={tunnelLoading}
                   onToggle={handleTunnelToggle}
-                  savedList={savedList}
                 />
               </div>
             </>
@@ -680,18 +558,6 @@ export default function IntegrationPage() {
                 onSelect={handleSelectItem}
               />
 
-              {/* Tunnel card for payment section */}
-              {activeTab === 'payment' && (
-                <div className="pt-4">
-                  <TunnelStatusCard
-                    webhookPort={webhookPort}
-                    tunnelUrl={tunnelUrl}
-                    tunnelLoading={tunnelLoading}
-                    onToggle={handleTunnelToggle}
-                    savedList={savedList}
-                  />
-                </div>
-              )}
             </>
           )}
         </div>

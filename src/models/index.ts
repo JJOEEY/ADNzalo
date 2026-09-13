@@ -7,6 +7,7 @@ export type { Contact, Friend, PageGroupMember, FriendRequest, Link } from './co
 export type {
     CRMNote, CRMCampaign, CRMCampaignContact, CRMSendLog,
     CRMTag, CRMContactTag,
+    CRMCampaignScriptVariantInput, CRMCampaignScriptExperimentInput, CRMCampaignScriptReportRow,
     CRMCampaignStatus, CRMContactStatus, CRMCampaignType,
 } from './crm';
 

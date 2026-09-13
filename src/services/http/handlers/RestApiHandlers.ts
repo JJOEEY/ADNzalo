@@ -13,6 +13,7 @@
 
 import DatabaseService from '../../database/DatabaseService';
 import ErpTaskService from '../../erp/ErpTaskService';
+import IntegrationRegistry from '../../integrations/IntegrationRegistry';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -448,6 +449,33 @@ export const handlers = {
     return success({ items: campaigns });
   },
 
+  getCRMCommonScriptRules(employee: RegisteredEmployee, params: any): JsonResponse {
+    const zaloId = params.zaloId || employee.assigned_accounts[0];
+    if (!zaloId) return error('Missing zaloId');
+    if (!employee.assigned_accounts.includes(zaloId)) return error('Không có quyền truy cập tài khoản này');
+    return success(db().getCRMCommonScriptRules(zaloId));
+  },
+
+  getCRMCampaignScriptExperiment(employee: RegisteredEmployee, params: any): JsonResponse {
+    const zaloId = params.zaloId || employee.assigned_accounts[0];
+    const campaignId = Number(params.campaignId || 0);
+    if (!zaloId) return error('Missing zaloId');
+    if (!campaignId) return error('Missing campaignId');
+    if (!employee.assigned_accounts.includes(zaloId)) return error('Không có quyền truy cập tài khoản này');
+    return success({ experiment: db().getCRMCampaignScriptExperiment(zaloId, campaignId) });
+  },
+
+  saveCRMCampaignScriptExperiment(employee: RegisteredEmployee, params: any): JsonResponse {
+    const zaloId = params.zaloId || employee.assigned_accounts[0];
+    const campaignId = Number(params.campaignId || 0);
+    if (!zaloId) return error('Missing zaloId');
+    if (!campaignId) return error('Missing campaignId');
+    if (!employee.assigned_accounts.includes(zaloId)) return error('Không có quyền truy cập tài khoản này');
+    const revision = db().saveCRMCampaignScriptExperiment(zaloId, campaignId, params.experiment);
+    if (!revision) return error('Không thể lưu dữ liệu đo kịch bản cho campaign này.');
+    return success({ revision });
+  },
+
   // ── Client Pool ──
   getClientPool(employee: RegisteredEmployee, params: any): JsonResponse {
     const zaloId = params.zaloId || employee.assigned_accounts[0];
@@ -818,6 +846,14 @@ export const handlers = {
     return success(data);
   },
 
+  getCampaignVariantReport(employee: RegisteredEmployee, params: any): JsonResponse {
+    const zaloId = params.zaloId || employee.assigned_accounts[0];
+    if (!zaloId) return error('Missing zaloId');
+    if (!employee.assigned_accounts.includes(zaloId)) return error('Không có quyền truy cập tài khoản này');
+
+    return success(db().getCampaignVariantReport(zaloId));
+  },
+
   getFriendRequestAnalytics(employee: RegisteredEmployee, params: any): JsonResponse {
     const zaloId = params.zaloId || employee.assigned_accounts[0];
     if (!zaloId) return error('Missing zaloId');
@@ -912,8 +948,12 @@ export const handlers = {
   // ═══════════════════════════════════════════════════════════════
 
   getIntegrations(employee: RegisteredEmployee, _params: any): JsonResponse {
-    const integrations = db().query<any>('SELECT * FROM integrations ORDER BY name ASC') || [];
-    return success({ items: integrations });
+    // Return only supported integrations and never expose encrypted or decrypted
+    // credentials through the REST query API. Commerce records from old databases
+    // remain internal and are excluded by the registry.
+    const integrations = IntegrationRegistry.listConfigs()
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return success({ items: integrations, webhookPort: IntegrationRegistry.getWebhookPort() });
   },
 
   // ═══════════════════════════════════════════════════════════════

@@ -742,10 +742,16 @@ export default function WorkflowList({ onEdit, onOpenStore }: Props) {
     try {
       if (isEmployeeMode) {
         const res = await DataAccessor.getWorkflows();
-        if (res?.success) setWorkflows(res.workflows || []);
+        if (res?.success) setWorkflows((res.workflows || []).map((wf: any) => ({
+          ...wf,
+          disabledReason: wf.disabledReason || wf.disabled_reason || '',
+        })));
       } else {
         const res = await ipc.workflow?.list();
-        if (res?.success) setWorkflows(res.workflows);
+        if (res?.success) setWorkflows((res.workflows || []).map((wf: any) => ({
+          ...wf,
+          disabledReason: wf.disabledReason || wf.disabled_reason || '',
+        })));
       }
     } finally {
       setLoading(false);
@@ -816,7 +822,11 @@ export default function WorkflowList({ onEdit, onOpenStore }: Props) {
       ? await DataAccessor.toggleWorkflow(id, enabled)
       : await ipc.workflow?.toggle(id, enabled);
     if (res?.success) {
-      setWorkflows(ws => ws.map(w => w.id === id ? { ...w, enabled } : w));
+      setWorkflows(ws => ws.map(w => w.id === id ? {
+        ...w,
+        enabled,
+        disabledReason: enabled ? '' : w.disabledReason,
+      } : w));
       return;
     }
     showNotification(res?.error || 'Không thể cập nhật trạng thái workflow', 'error');
@@ -1237,6 +1247,12 @@ export default function WorkflowList({ onEdit, onOpenStore }: Props) {
                     </div>
                     {wf.description && (
                       <p className="text-gray-400 text-xs line-clamp-2 leading-relaxed">{wf.description}</p>
+                    )}
+                    {!wf.enabled && wf.disabledReason && (
+                      <p className="mt-2 flex items-start gap-1.5 rounded-lg border border-amber-700/30 bg-amber-900/10 px-2.5 py-2 text-[11px] leading-relaxed text-amber-300">
+                        <span className="flex-shrink-0">⚠</span>
+                        <span>{wf.disabledReason}</span>
+                      </p>
                     )}
                   </div>
                 </div>

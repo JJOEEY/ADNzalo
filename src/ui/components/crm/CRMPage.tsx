@@ -307,9 +307,9 @@ export default function CRMPage() {
     // activeAccountId có thể còn null nếu bấm ngay lúc khởi động (account chưa auto-select xong).
     // Fallback về account đầu tiên trong store để không mất thao tác tạo.
     const acctId = activeAccountId || accounts?.[0]?.zalo_id;
-    if (!acctId) return;
+    if (!acctId) throw new Error('Chưa chọn tài khoản gửi chiến dịch.');
     if (!activeAccountId) setActiveAccount(acctId);
-    const res = await DataAccessor.saveCRMCampaign({ zaloId: acctId, campaign: data });
+      const res = await DataAccessor.saveCRMCampaign({ zaloId: acctId, campaign: data });
     if (res?.success) {
       await loadCampaigns();
       store.setActiveCampaign(res.id);
@@ -320,11 +320,17 @@ export default function CRMPage() {
         setShowCreateCampaign(false);
         setWizardStep(2);
       }
+      return res.id;
     }
+    throw new Error(res?.error || 'Không thể tạo chiến dịch.');
   };
 
   const handleUpdateCampaignStatus = async (id: number, status: string) => {
-    await DataAccessor.updateCampaignStatus({ campaignId: id, status });
+    const res = await DataAccessor.updateCampaignStatus({ campaignId: id, status });
+    if (!res?.success) {
+      showNotification(res?.error || 'Chưa thể cập nhật trạng thái chiến dịch.', 'error');
+      return;
+    }
     await loadCampaigns();
     showNotification(
       status === 'active' ? '▶ Chiến dịch đang chạy'
@@ -362,7 +368,7 @@ export default function CRMPage() {
   };
 
   const handleUpdateCampaign = async (data: any) => {
-    if (!activeAccountId || !store.activeCampaignId) return;
+    if (!activeAccountId || !store.activeCampaignId) throw new Error('Không tìm thấy chiến dịch cần lưu.');
     const currentCampaign = store.campaigns.find(c => c.id === store.activeCampaignId);
     const res = await DataAccessor.saveCRMCampaign({
       zaloId: activeAccountId,
@@ -375,19 +381,22 @@ export default function CRMPage() {
     if (res?.success) {
       await loadCampaigns();
       showNotification('Đã cập nhật chiến dịch', 'success');
+      return store.activeCampaignId;
     } else {
-      showNotification('Lỗi: Không thể lưu', 'error');
+      throw new Error(res?.error || 'Không thể lưu campaign.');
     }
   };
 
   const handleCreateCampaignInAddModal = async (data: any) => {
-    if (!activeAccountId) return;
+    if (!activeAccountId) throw new Error('Chưa chọn tài khoản gửi chiến dịch.');
     const res = await DataAccessor.saveCRMCampaign({ zaloId: activeAccountId, campaign: data });
     if (res?.success) {
       await loadCampaigns();
       if (res.id) setSelectedCampaignForAdd(res.id);
       showNotification('Đã tạo chiến dịch', 'success');
+      return res.id;
     }
+    throw new Error(res?.error || 'Không thể tạo chiến dịch.');
   };
 
   // ── Wizard handlers ─────────────────────────────────────────────────────
@@ -1048,8 +1057,7 @@ export default function CRMPage() {
           channel={(activeAccount?.channel || CHANNEL.ZALO) as Channel}
           onClose={() => setShowCreateInAddModal(false)}
           onSave={async (data) => {
-            await handleCreateCampaignInAddModal(data);
-            setShowCreateInAddModal(false);
+            return await handleCreateCampaignInAddModal(data);
           }}
         />
       )}

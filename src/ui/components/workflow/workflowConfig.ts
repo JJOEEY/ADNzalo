@@ -222,6 +222,20 @@ export const NODE_GROUPS: NodeGroup[] = [
 
 const ALL_NODE_GROUPS: NodeGroup[] = NODE_GROUPS;
 
+const REMOVED_COMMERCE_NODE_PREFIXES = [
+  'kiotviet.', 'haravan.', 'sapo.', 'nhanh.', 'pancake.', 'payment.', 'ghn.', 'ghtk.',
+];
+
+function isRemovedCommerceNode(type: string): boolean {
+  return type === 'trigger.payment' || REMOVED_COMMERCE_NODE_PREFIXES.some(prefix => type.startsWith(prefix));
+}
+
+// New workflows only show active nodes. NODE_GROUPS stays intact so saved
+// commerce workflows can still resolve their labels and render for history.
+export const AVAILABLE_NODE_GROUPS: NodeGroup[] = NODE_GROUPS
+  .map(group => ({ ...group, items: group.items.filter(item => !isRemovedCommerceNode(item.type)) }))
+  .filter(group => group.items.length > 0);
+
 export const DEFAULT_CONFIGS: Record<string, Record<string, any>> = {
   'trigger.message':       { threadType: 'all', keyword: '', keywordMode: 'contains_any', ignoreOwn: true, debounceSeconds: 0 },
   'trigger.friendRequest': {},
@@ -408,4 +422,3 @@ export const GROUP_COLORS: Record<string, string> = {
   integration: '#16a34a',
   output:      '#e11d48',
 };
-

@@ -26,6 +26,11 @@ on:
         required: false
         default: ''
         type: string
+      draft:
+        description: 'Keep release as draft until assets are verified'
+        required: false
+        default: false
+        type: boolean
 
   push:
     tags:
@@ -113,7 +118,7 @@ jobs:
             dist-electron-build/*.blockmap
             dist-electron-build/latest.yml
           token: ${{ secrets.GITHUB_TOKEN }}
-          draft: false
+          draft: ${{ github.event.inputs.draft == 'true' }}
           prerelease: false
           make_latest: false
           fail_on_unmatched_files: false
@@ -139,6 +144,15 @@ jobs:
       - name: 📦 Install dependencies
         run: npm ci --legacy-peer-deps
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: false
+
+      - name: Build macOS E2EE bridge
+        run: npm run build:bridge-e2ee
+
       - name: 🏗️ Compile TypeScript (electron)
         run: npx tsc -p tsconfig.electron.prod.json
 
@@ -163,12 +177,13 @@ jobs:
           name: "ADNzalo ${{ needs.resolve-tag.outputs.tag }}"
           files: |
             dist-electron-build/*.dmg
+            dist-electron-build/*.zip
             dist-electron-build/*.blockmap
             dist-electron-build/latest-mac.yml
           token: ${{ secrets.GITHUB_TOKEN }}
-          draft: false
+          draft: ${{ github.event.inputs.draft == 'true' }}
           prerelease: false
-          make_latest: true
+          make_latest: ${{ github.event.inputs.draft != 'true' }}
           fail_on_unmatched_files: false
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -237,7 +252,7 @@ jobs:
             dist-electron-build/*.blockmap
             dist-electron-build/latest-linux.yml
           token: ${{ secrets.GITHUB_TOKEN }}
-          draft: false
+          draft: ${{ github.event.inputs.draft == 'true' }}
           prerelease: false
           make_latest: false
           fail_on_unmatched_files: false

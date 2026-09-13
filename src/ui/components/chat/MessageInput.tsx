@@ -1,4 +1,9 @@
 import React, {useCallback, useEffect, useLayoutEffect, useRef, useState} from 'react';
+
+const REMOVED_COMMERCE_INTEGRATION_TYPES = new Set([
+  'kiotviet', 'haravan', 'sapo', 'nhanh', 'pancake',
+  'casso', 'sepay', 'ghn', 'ghtk',
+]);
 import {useChatStore} from '@/store/chatStore';
 import {useAccountStore} from '@/store/accountStore';
 import {useAppStore} from '@/store/appStore';
@@ -3550,10 +3555,10 @@ export default function MessageInput() {
         </ToolbarBtn>
 
         {/* ── Pinned integration shortcuts ── */}
-        {pinnedIntegrationShortcuts.length > 0 && (
+        {pinnedIntegrationShortcuts.some(shortcut => !REMOVED_COMMERCE_INTEGRATION_TYPES.has(shortcut.integrationType)) && (
           <>
             <div className="w-px h-4 bg-gray-700 mx-0.5 flex-shrink-0" />
-            {pinnedIntegrationShortcuts.map(shortcut => (
+            {pinnedIntegrationShortcuts.filter(shortcut => !REMOVED_COMMERCE_INTEGRATION_TYPES.has(shortcut.integrationType)).map(shortcut => (
               <div key={shortcut.id} className="relative flex-shrink-0">
                 <ToolbarBtn
                   onClick={() => {
@@ -5050,7 +5055,7 @@ function MoreMenuDropdown({ isGroup, onCreatePoll, onCreateNote, onCreateReminde
   const integrationItem = {
     icon: <PluginIcon className="w-4 h-4" />,
     label: 'Tích hợp nhanh',
-    sublabel: 'Tra cứu đơn, sản phẩm, vận chuyển...',
+    sublabel: 'Thao tác với tích hợp đang kết nối',
     color: 'text-purple-400',
     onClick: onOpenIntegration,
   };

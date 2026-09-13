@@ -43,6 +43,10 @@ export interface CRMCampaign {
   pending_count: number;
   failed_count: number;
   sent_today_count: number;    // computed: gửi trong ngày hôm nay
+  script_rules_snapshot?: string;
+  script_rules_version?: number;
+  script_approved_at?: number;
+  script_approved_template?: string;
 }
 
 export interface CRMContact {

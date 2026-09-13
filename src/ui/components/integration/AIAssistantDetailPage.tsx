@@ -463,6 +463,7 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
   // ─── POS product handlers ───────────────────────────────────────────────
 
   const posIntegrationType = posIntegrations.find(p => p.id === posIntegrationId)?.type || '';
+  const canLinkCommerceIntegrations = false;
 
   const handleSearchPosProducts = useCallback(async (query: string, page: number) => {
     if (!posIntegrationId) return;
@@ -785,8 +786,8 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
             </div>
           </div>
 
-          {/* POS Integration */}
-          <div>
+          {/* Preserve old POS binding fields on save, but do not offer commerce choices in new assistant edits. */}
+          {canLinkCommerceIntegrations && <div>
             <h2 className="text-sm font-semibold text-gray-300 mb-2"><ShoppingCartIcon className="w-4 h-4 inline" /> Liên kết POS</h2>
             <div className="bg-gray-800 rounded-xl p-4 space-y-3">
               <select value={posIntegrationId} onChange={e => {
@@ -953,7 +954,7 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
                 </div>
               )}
             </div>
-          </div>
+          </div>}
 
           {/* ADN MCP market data (live stock context) */}
           <div>

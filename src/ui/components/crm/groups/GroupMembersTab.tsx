@@ -1011,7 +1011,9 @@ function ZaloGroupMembersTab() {
         setLocalCampaigns(available);
         if (res.id) setPickedCampaignId(res.id);
       }
+      return res.id;
     }
+    throw new Error(res?.error || 'Không thể tạo chiến dịch');
   }, [activeAccountId]);
 
   // ── Add selected members to campaign ─────────────────────────────────────
@@ -1842,10 +1844,7 @@ function ZaloGroupMembersTab() {
       {showCreateCampaign && (
         <CampaignCreateModal
           onClose={() => setShowCreateCampaign(false)}
-          onSave={async (data) => {
-            await handleCreateCampaignInPicker(data);
-            setShowCreateCampaign(false);
-          }}
+          onSave={async (data) => await handleCreateCampaignInPicker(data)}
         />
       )}
 
@@ -2342,6 +2341,7 @@ function TelegramGroupMembersTab({ channel }: { channel: 'telegram_user' | 'tele
       setCampaigns((next.campaigns || []).filter((campaign: any) => campaign.status !== 'done' && campaign.channel === channel));
       if (res?.id) setPickedCampaignId(res.id);
     }
+    return res?.id;
   }, [activeAccountId, channel]);
 
   const visibleGroups = groups.filter(g => (g.display_name || g.contact_id).toLowerCase().includes(query.toLowerCase()));

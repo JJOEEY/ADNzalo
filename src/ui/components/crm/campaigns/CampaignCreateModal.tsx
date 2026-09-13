@@ -2,12 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import DataAccessor from '@/lib/data/DataAccessor';
 import ipc from '@/lib/ipc';
 import { useAccountStore } from '@/store/accountStore';
-import CampaignAIScriptDialog from './CampaignAIScriptDialog';
+import CampaignAIScriptDialog, { validateCampaignVariation } from './CampaignAIScriptDialog';
 import { toLocalMediaUrl } from '@/lib/localMedia';
 import { Spinner } from '@/components/common/PageLoading';
 import { AlertIcon, ChartIcon, ChatIcon, ClipboardListIcon, EditIcon, RocketIcon, SendIcon, ShuffleIcon, SparklesIcon, UserCheckIcon, UsersIcon } from '@/components/common/icons';
 import { parseMarkup } from '../../../../services/crm/message-markup';
 import { type Channel } from '../../../../configs/channelConfig';
+import { useAppStore } from '@/store/appStore';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -37,11 +38,12 @@ interface CampaignFormData {
 
 interface CampaignCreateModalProps {
   initialData?: Partial<CampaignFormData>;
+  campaignId?: number;
   editMode?: boolean;
   zaloId?: string;
   channel?: Channel;
   onClose: () => void;
-  onSave: (data: CampaignFormData) => Promise<void>;
+  onSave: (data: CampaignFormData) => Promise<number | void>;
 }
 
 // Preview substitution - replaces variables with dummy values (ADN: hỗ trợ <Xưng hô> <Tên>)
@@ -536,8 +538,9 @@ function BlockEditor({
 // ── Main Modal ────────────────────────────────────────────────────────────────
 
 export default function CampaignCreateModal({
-  initialData, editMode = false, zaloId, channel = 'zalo', onClose, onSave,
+  initialData, campaignId, editMode = false, zaloId, channel = 'zalo', onClose, onSave,
 }: CampaignCreateModalProps) {
+  const { showNotification } = useAppStore();
   const [name,          setName]         = useState(initialData?.name ?? '');
   const [type,          setType]         = useState<CampaignType>(initialData?.campaign_type ?? 'message');
   const telegramCampaign = channel === 'telegram_user' || channel === 'telegram_bot';
@@ -581,6 +584,31 @@ export default function CampaignCreateModal({
   const [contentConfig, setContentConfig] = useState<ContentConfig>(() =>
     parseContentConfig(initialData?.template_message)
   );
+  const [scriptRulesSnapshot, setScriptRulesSnapshot] = useState('');
+  const [scriptExperiment, setScriptExperiment] = useState<{
+    rulesVersion: number; rulesSnapshot: string; variantIds: string[];
+  } | null>(null);
+  const [scriptExperimentDirty, setScriptExperimentDirty] = useState(false);
+  const scriptExperimentDirtyRef = useRef(false);
+
+  useEffect(() => {
+    if (!campaignId || !zaloId) return;
+    let cancelled = false;
+    DataAccessor.getCRMCampaignScriptExperiment({ zaloId, campaignId })
+      .then((res: any) => {
+        if (cancelled || scriptExperimentDirtyRef.current) return;
+        const experiment = res?.experiment;
+        if (res?.success && experiment?.active && Array.isArray(experiment.variants)) {
+          const variantIds = experiment.variants.map((variant: any) => String(variant.id || '')).filter(Boolean);
+          const rulesSnapshot = String(experiment.rules_snapshot || '');
+          setScriptExperiment({ rulesVersion: Number(experiment.rules_version || 0), rulesSnapshot, variantIds });
+          setScriptRulesSnapshot(rulesSnapshot);
+        }
+      })
+      .catch(() => {})
+      .finally(() => { /* Loading the CRM sidecar must not change the campaign flow. */ });
+    return () => { cancelled = true; };
+  }, [campaignId, zaloId]);
 
   const initMixed = parseMixedConfig(initialData?.mixed_config);
   const [mixedActions,   setMixedActions]   = useState<MixedAction[]>(initMixed.actions);
@@ -622,9 +650,17 @@ export default function CampaignCreateModal({
 
   // Thêm biến thể AI: nếu các block hiện tại đều trống thì thay thế, ngược lại append.
   // Nhiều hơn 1 block → bật random để xoay vòng nội dung, tránh spam do trùng tin.
-  const applyAIVariations = (texts: string[]) => {
+  const markScriptExperimentDirty = () => {
+    scriptExperimentDirtyRef.current = true;
+    setScriptExperimentDirty(true);
+  };
+
+  const applyAIVariations = (texts: string[], rulesSnapshot: string, rulesVersion: number) => {
     const fresh = texts.filter((t) => t.trim()).map((t) => ({ id: genId(), text: t.trim(), images: [] as string[] }));
     if (!fresh.length) return;
+    setScriptRulesSnapshot(rulesSnapshot);
+    setScriptExperiment({ rulesVersion, rulesSnapshot, variantIds: fresh.map(block => block.id) });
+    markScriptExperimentDirty();
     setContentConfig((prev) => {
       const allEmpty = prev.blocks.every((b) => !b.text.trim() && b.images.length === 0);
       const blocks = allEmpty ? fresh : [...prev.blocks, ...fresh];
@@ -642,6 +678,7 @@ export default function CampaignCreateModal({
   };
 
   const removeBlock = (id: string) => {
+    if (scriptExperiment?.variantIds.includes(id)) markScriptExperimentDirty();
     setContentConfig(prev => {
       const next = { ...prev, blocks: prev.blocks.filter(b => b.id !== id) };
       setActiveBlock(i => Math.min(i, Math.max(0, next.blocks.length - 1)));
@@ -649,8 +686,10 @@ export default function CampaignCreateModal({
     });
   };
 
-  const updateBlock = (id: string, u: Partial<ContentBlock>) =>
+  const updateBlock = (id: string, u: Partial<ContentBlock>) => {
+    if (scriptExperiment?.variantIds.includes(id)) markScriptExperimentDirty();
     setContentConfig(prev => ({ ...prev, blocks: prev.blocks.map(b => b.id === id ? { ...b, ...u } : b) }));
+  };
 
   const toggleMixedAction = (a: MixedAction) =>
     setMixedActions(prev => prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a]);
@@ -683,25 +722,60 @@ export default function CampaignCreateModal({
 
   const handleSave = async () => {
     if (!isValid()) return;
+    const experimentBlocks = scriptExperiment
+      ? contentConfig.blocks.filter(block => scriptExperiment.variantIds.includes(block.id))
+      : [];
+    const scriptIssues = experimentBlocks.flatMap((block, index) =>
+      validateCampaignVariation(block.text || '').map(issue => `Biến thể ${index + 1}: ${issue}`)
+    );
+    if (scriptExperimentDirty && scriptIssues.length) {
+      showNotification(`Kịch bản cần sửa trước khi lưu: ${scriptIssues.join(' · ')}`, 'error');
+      return;
+    }
     setSaving(true);
     const finalDelaySec = Math.round((delayMin + delayMax) / 2);
-    await onSave({
-      name: name.trim(),
-      template_message: hasMsg ? JSON.stringify(contentConfig) : '',
-      friend_request_message: friendReqMsg.trim(),
-      campaign_type: type,
-      mixed_config: buildMixedConfig(),
-      delay_seconds: finalDelaySec,
-      delay_min_seconds: delayMin,
-      delay_max_seconds: delayMax,
-      per_contact_delay_min_seconds: pcDelayMin,
-      per_contact_delay_max_seconds: pcDelayMax,
-      daily_send_limit: dailyLimit,
-      daily_start_time: dailyStartTime,
-      sender_zalo_ids: selectedSenderIds,
-    });
-    setSaving(false);
-    onClose();
+    try {
+      const savedCampaignId = await onSave({
+        name: name.trim(),
+        template_message: hasMsg ? JSON.stringify(contentConfig) : '',
+        friend_request_message: friendReqMsg.trim(),
+        campaign_type: type,
+        mixed_config: buildMixedConfig(),
+        delay_seconds: finalDelaySec,
+        delay_min_seconds: delayMin,
+        delay_max_seconds: delayMax,
+        per_contact_delay_min_seconds: pcDelayMin,
+        per_contact_delay_max_seconds: pcDelayMax,
+        daily_send_limit: dailyLimit,
+        daily_start_time: dailyStartTime,
+        sender_zalo_ids: selectedSenderIds,
+      });
+      if (savedCampaignId && zaloId && scriptExperiment && scriptExperimentDirty) {
+        const active = experimentBlocks.length >= 2;
+        const experimentRes = await DataAccessor.saveCRMCampaignScriptExperiment({
+          zaloId,
+          campaignId: savedCampaignId,
+          experiment: {
+            rulesVersion: scriptExperiment.rulesVersion,
+            rulesSnapshot: scriptExperiment.rulesSnapshot,
+            active,
+            variants: active ? experimentBlocks.map((block, index) => ({
+              id: block.id,
+              label: `Biến thể ${index + 1}`,
+              snapshot: JSON.stringify(block),
+            })) : [],
+          },
+        });
+        if (!experimentRes?.success) {
+          showNotification(experimentRes?.error || 'Campaign đã lưu nhưng không lưu được dữ liệu đo kịch bản.', 'error');
+        }
+      }
+      setSaving(false);
+      onClose();
+    } catch (err: any) {
+      setSaving(false);
+      showNotification(err?.message || 'Không thể lưu campaign.', 'error');
+    }
   };
 
   const insertFRVar = (v: string) => {
@@ -1127,7 +1201,7 @@ export default function CampaignCreateModal({
 
         {/* ── Footer ── */}
         <div className="flex items-center gap-3 px-5 py-3 border-t border-gray-700 flex-shrink-0">
-          <div className="flex-1 text-[11px] text-gray-400">
+          <div className="flex-1 text-[11px] text-gray-400 min-w-0">
             {hasMsg && contentConfig.blocks.length > 1 && (
               <span>{contentConfig.blocks.length} biến thể · {contentConfig.mode === 'random' ? '🎲 random' : '📨 gửi tất cả'}</span>
             )}
@@ -1150,6 +1224,7 @@ export default function CampaignCreateModal({
           senderName={senderName}
           zaloId={zaloId}
           channel={channel}
+          initialRulesSnapshot={scriptExperiment?.rulesSnapshot || scriptRulesSnapshot || undefined}
           onApply={applyAIVariations}
           onClose={() => setShowAIDialog(false)}
         />

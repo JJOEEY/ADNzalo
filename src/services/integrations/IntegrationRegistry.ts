@@ -5,16 +5,21 @@ import Logger from '../../utils/Logger';
 import DatabaseService from '../database/DatabaseService';
 import EventBroadcaster from '../event/EventBroadcaster';
 import { IntegrationAdapter, IntegrationConfig } from './IntegrationAdapter';
-import { KiotVietAdapter } from './adapters/KiotVietAdapter';
-import { CassoAdapter } from './adapters/CassoAdapter';
-import { SePayAdapter } from './adapters/SePayAdapter';
-import { GHNAdapter } from './adapters/GHNAdapter';
-import { GHTKAdapter } from './adapters/GHTKAdapter';
-import { HaravanAdapter } from './adapters/HaravanAdapter';
-import { SapoAdapter } from './adapters/SapoAdapter';
-import { NhanhAdapter } from './adapters/NhanhAdapter';
-import { PancakeAdapter } from './adapters/PancakeAdapter';
 import { TelegramBotAdapter } from './adapters/TelegramBotAdapter';
+
+const REMOVED_COMMERCE_TYPES = new Set([
+  'kiotviet', 'haravan', 'sapo', 'nhanh', 'pancake',
+  'casso', 'sepay', 'ghn', 'ghtk',
+]);
+const SUPPORTED_INTEGRATION_TYPES = new Set(['telegram_bot']);
+
+function isRemovedCommerceType(type: string): boolean {
+  return REMOVED_COMMERCE_TYPES.has(type.toLowerCase());
+}
+
+function isSupportedIntegrationType(type: string): boolean {
+  return SUPPORTED_INTEGRATION_TYPES.has(type.toLowerCase());
+}
 
 /** Map of active adapter instances (integrationId → adapter) */
 const adapterInstances = new Map<string, IntegrationAdapter>();
@@ -27,15 +32,6 @@ let webhookPort = 9888;
 
 function createAdapter(config: IntegrationConfig): IntegrationAdapter {
   switch (config.type) {
-    case 'kiotviet': return new KiotVietAdapter(config);
-    case 'casso':    return new CassoAdapter(config);
-    case 'sepay':    return new SePayAdapter(config);
-    case 'ghn':      return new GHNAdapter(config);
-    case 'ghtk':     return new GHTKAdapter(config);
-    case 'haravan':  return new HaravanAdapter(config);
-    case 'sapo':     return new SapoAdapter(config);
-    case 'nhanh':    return new NhanhAdapter(config);
-    case 'pancake':  return new PancakeAdapter(config);
     case 'telegram_bot': return new TelegramBotAdapter(config);
     default:
       throw new Error(`Loại integration không hỗ trợ: ${config.type}`);
@@ -127,7 +123,9 @@ export const IntegrationRegistry = {
 
   /** List all integration configs (credentials stripped) */
   listConfigs(): Omit<IntegrationConfig, 'credentials'>[] {
-    return dbListAll().map(({ credentials: _creds, ...rest }) => rest);
+    return dbListAll()
+      .filter(config => isSupportedIntegrationType(config.type))
+      .map(({ credentials: _creds, ...rest }) => rest);
   },
 
   /** Get single config (with credentials masked for security) */
@@ -136,6 +134,7 @@ export const IntegrationRegistry = {
     const row = rows.find((r: any) => r.id === id);
     if (!row) return null;
     const cfg = rowToConfig(row);
+    if (!isSupportedIntegrationType(cfg.type)) return null;
     // Mask credential values: keep keys but replace values with '••••'
     const masked: Record<string, string> = {};
     for (const k of Object.keys(cfg.credentials)) {
@@ -157,6 +156,13 @@ export const IntegrationRegistry = {
     const now = Date.now();
     const id = config.id || uuidv4();
     const existing = config.id ? this.getConfigWithCredentials(config.id) : null;
+    const type = String(config.type || existing?.type || '').trim().toLowerCase();
+    if (isRemovedCommerceType(type)) {
+      throw new Error(`Tích hợp ${type} không còn được hỗ trợ`);
+    }
+    if (!isSupportedIntegrationType(type)) {
+      throw new Error(`Loại tích hợp không được hỗ trợ: ${type || '(trống)'}`);
+    }
     const mergedCredentials: Record<string, string> = { ...(existing?.credentials || {}) };
 
     // Merge credentials safely: blank/masked values keep old credential
@@ -169,7 +175,7 @@ export const IntegrationRegistry = {
     const encryptedCreds = encryptCredentials(mergedCredentials);
     DatabaseService.getInstance().upsertIntegration({
       id,
-      type: config.type || existing?.type || '',
+      type,
       name: config.name || existing?.name || '',
       enabled: config.enabled !== false ? 1 : 0,
       credentials_encrypted: encryptedCreds,
@@ -203,10 +209,16 @@ export const IntegrationRegistry = {
 
   /** Toggle enabled state */
   toggleEnabled(id: string, enabled: boolean): void {
-    DatabaseService.getInstance().toggleIntegration(id, enabled);
-    DatabaseService.getInstance().save();
     const cfg = this.getConfigWithCredentials(id);
     if (!cfg) return;
+    if (enabled && isRemovedCommerceType(cfg.type)) {
+      throw new Error(`Tích hợp ${cfg.type} không còn được hỗ trợ`);
+    }
+    if (enabled && !isSupportedIntegrationType(cfg.type)) {
+      throw new Error(`Loại tích hợp không được hỗ trợ: ${cfg.type}`);
+    }
+    DatabaseService.getInstance().toggleIntegration(id, enabled);
+    DatabaseService.getInstance().save();
     if (enabled) {
       try {
         const adapter = createAdapter(cfg);
@@ -294,24 +306,11 @@ export const IntegrationRegistry = {
 
           // Find matching integration
           const allConfigs = dbListAll();
-          const matchById = allConfigs.find(c => c.id === route);
-          const matchByType = allConfigs.find(c => c.type === route && c.enabled);
+          const matchById = allConfigs.find(c => c.id === route && !isRemovedCommerceType(c.type));
+          const matchByType = allConfigs.find(c => c.type === route && c.enabled && !isRemovedCommerceType(c.type));
           const config = matchById || matchByType;
 
           if (config) {
-            // Emit payment event for workflow triggers
-            if (config.type === 'casso' || config.type === 'sepay') {
-              const transactions: any[] = payload?.data || (Array.isArray(payload) ? payload : [payload]);
-              for (const tx of transactions) {
-                EventBroadcaster.emit('integration:payment', {
-                  integrationId: config.id,
-                  integrationType: config.type,
-                  transaction: tx,
-                  raw: payload,
-                });
-              }
-            }
-
             // Emit general webhook event
             EventBroadcaster.emit('integration:webhook', {
               integrationId: config.id,

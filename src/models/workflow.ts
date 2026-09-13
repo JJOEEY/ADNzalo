@@ -3,6 +3,7 @@ export interface Workflow {
     name: string;
     description: string;
     enabled: number;
+    disabled_reason?: string;
     channel: string;
     page_id: string;
     page_ids: string;

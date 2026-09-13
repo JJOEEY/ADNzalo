@@ -63,6 +63,7 @@ export function registerCRMIpc(): void {
         try {
             if (isEmployeeMode()) proxyToBoss('crm:saveClientPool', { zaloId, entry });
             const id = DatabaseService.getInstance().upsertClientPoolEntry({ ...entry, owner_zalo_id: zaloId });
+            if (!id) return { success: false, error: 'Không thể lưu kết quả. Hãy chọn campaign hợp lệ để ghi nhận sale.' };
             DatabaseService.getInstance().save();
             EventBroadcaster.emit('crm:clientPoolChanged', { action: 'save', ownerZaloId: zaloId, id, entry });
             proxyToBoss('crm:saveClientPool', { zaloId, entry });
@@ -117,6 +118,39 @@ export function registerCRMIpc(): void {
         catch (e: any) { return { success: false, error: e.message, total: 0, friendCount: 0, noteCount: 0 }; }
     });
 
+    ipcMain.handle('crm:getScriptRules', async (_e, { zaloId }: { zaloId: string }) => {
+        try { return { success: true, rules: DatabaseService.getInstance().getCRMCommonScriptRules(zaloId) }; }
+        catch (e: any) { return { success: false, error: e.message }; }
+    });
+
+    ipcMain.handle('crm:saveScriptRules', async (_e, { zaloId, rulesText }: { zaloId: string; rulesText: string }) => {
+        try {
+            const rules = DatabaseService.getInstance().saveCRMCommonScriptRules(zaloId, rulesText || '');
+            if (!rules) return { success: false, error: 'Quy tắc không được để trống và tối đa 10.000 ký tự.' };
+            DatabaseService.getInstance().save();
+            return { success: true, rules };
+        } catch (e: any) { return { success: false, error: e.message }; }
+    });
+
+    ipcMain.handle('crm:getScriptExperiment', async (_e, { zaloId, campaignId }: { zaloId: string; campaignId: number }) => {
+        try {
+            const experiment = DatabaseService.getInstance().getCRMCampaignScriptExperiment(zaloId, campaignId);
+            return { success: true, experiment };
+        } catch (e: any) { return { success: false, error: e.message }; }
+    });
+
+    ipcMain.handle('crm:saveScriptExperiment', async (_e, { zaloId, campaignId, experiment }: { zaloId: string; campaignId: number; experiment: any }) => {
+        try {
+            const db = DatabaseService.getInstance();
+            const revision = db.saveCRMCampaignScriptExperiment(zaloId, campaignId, experiment);
+            if (!revision) return { success: false, error: 'Không thể lưu dữ liệu đo kịch bản cho campaign này.' };
+            db.save();
+            EventBroadcaster.emit('crm:campaignChanged', { action: 'scriptExperiment', ownerZaloId: zaloId, campaignId });
+            proxyToBoss('crm:saveScriptExperiment', { zaloId, campaignId, experiment });
+            return { success: true, revision };
+        } catch (e: any) { return { success: false, error: e.message }; }
+    });
+
     // ─── Campaigns ─────────────────────────────────────────────────────────
     ipcMain.handle('crm:getCampaigns', async (_e, { zaloId }: { zaloId: string }) => {
         try {
@@ -141,6 +175,7 @@ export function registerCRMIpc(): void {
             }))];
             if (sender_zalo_ids.length === 0) sender_zalo_ids.push(zaloId);
             const id = db.saveCRMCampaign({ ...campaign, sender_zalo_ids, owner_zalo_id: zaloId });
+            if (!id) return { success: false, error: 'Không thể lưu campaign.' };
             db.save();
             EventBroadcaster.emit('crm:campaignChanged', { action: 'save', ownerZaloId: zaloId, id, campaign });
 
@@ -208,7 +243,8 @@ export function registerCRMIpc(): void {
             if (!existing) return { success: false, error: 'Không tìm thấy chiến dịch' };
             const capability = validateCampaignForChannel(existing.owner_zalo_id, existing);
             if (!capability.allowed) return { success: false, error: capability.reason };
-            db.updateCRMCampaignStatus(campaignId, status as any);
+            const changed = db.updateCRMCampaignStatus(campaignId, status as any);
+            if (!changed) return { success: false, error: 'Không thể cập nhật trạng thái chiến dịch.' };
             db.save();
             // Start/stop queue
             const campaign = db.getCRMCampaign(campaignId);
@@ -327,6 +363,11 @@ export function registerCRMIpc(): void {
     ipcMain.handle('analytics:campaignComparison', async (_e, { zaloId }: { zaloId: string }) => {
         try { return { success: true, data: DatabaseService.getInstance().getCampaignComparison(zaloId) }; }
         catch (e: any) { return { success: false, error: e.message }; }
+    });
+
+    ipcMain.handle('analytics:campaignVariantReport', async (_e, { zaloId }: { zaloId: string }) => {
+        try { return { success: true, data: DatabaseService.getInstance().getCampaignVariantReport(zaloId) }; }
+        catch (e: any) { return { success: false, error: e.message, data: [] }; }
     });
 
     ipcMain.handle('analytics:friendRequests', async (_e, { zaloId, sinceTs, untilTs }: { zaloId: string; sinceTs: number; untilTs: number }) => {

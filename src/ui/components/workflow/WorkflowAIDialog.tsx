@@ -2,10 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import DataAccessor from '../../lib/data/DataAccessor';
 import ipc from '../../lib/ipc';
-import { NODE_GROUPS, DEFAULT_CONFIGS, getNodeLabel } from './workflowConfig';
+import { AVAILABLE_NODE_GROUPS, DEFAULT_CONFIGS, getNodeLabel } from './workflowConfig';
 import { Channel, getChannelLabel } from '../../../configs/channelConfig';
 import { useAppStore } from '@/store/appStore';
 import { BotIcon, CheckIcon, SparklesIcon, UserIcon } from '@/components/common/icons';
+
+const AVAILABLE_NODE_TYPES = new Set(AVAILABLE_NODE_GROUPS.flatMap(group => group.items.map(item => item.type)));
 
 interface WorkflowAIDialogProps {
   currentNodes: any[];
@@ -23,7 +25,7 @@ function channelFilter(item: { channel?: string }, channel: string): boolean {
 
 // ── Build concise catalog of all node types for the AI system prompt ──────────
 function buildNodeCatalog(channel: string): string {
-  return NODE_GROUPS.map(g => {
+  return AVAILABLE_NODE_GROUPS.map(g => {
     const items = g.items
       .filter(it => channelFilter(it, channel))
       .map(it => {
@@ -187,6 +189,14 @@ export default function WorkflowAIDialog({ currentNodes, currentEdges, channel, 
   const handleApply = () => {
     if (!preview) return;
 
+    const previewNodes = Array.isArray(preview.nodes) ? preview.nodes : [];
+    const allowedPreviewNodes = previewNodes.filter((node: any) => AVAILABLE_NODE_TYPES.has(node.type));
+    const skippedNodeCount = previewNodes.length - allowedPreviewNodes.length;
+    if (allowedPreviewNodes.length === 0) {
+      showNotification('AI không tạo node nào còn được hỗ trợ. Hãy mô tả lại yêu cầu.', 'warning');
+      return;
+    }
+
     // Calculate offset: place new nodes to the right of existing ones
     const maxX = currentNodes.length > 0
       ? Math.max(...currentNodes.map(n => (n.position?.x || 0) + 250))
@@ -194,7 +204,7 @@ export default function WorkflowAIDialog({ currentNodes, currentEdges, channel, 
 
     // Remap IDs
     const idMap: Record<string, string> = {};
-    const newNodes = (preview.nodes || []).map((n: any) => {
+    const newNodes = allowedPreviewNodes.map((n: any) => {
       const newId = uuidv4();
       idMap[n.id] = newId;
       return {
@@ -209,7 +219,14 @@ export default function WorkflowAIDialog({ currentNodes, currentEdges, channel, 
       };
     });
 
-    const newEdges = (preview.edges || []).map((e: any) => ({
+    const allowedOriginalIds = new Set(allowedPreviewNodes.map((node: any) => node.id));
+    const currentNodeIds = new Set(currentNodes.map(node => node.id));
+    const validEdges = (preview.edges || []).filter((edge: any) => {
+      const hasSource = allowedOriginalIds.has(edge.source) || currentNodeIds.has(edge.source);
+      const hasTarget = allowedOriginalIds.has(edge.target) || currentNodeIds.has(edge.target);
+      return hasSource && hasTarget;
+    });
+    const newEdges = validEdges.map((e: any) => ({
       id: uuidv4(),
       source: idMap[e.source] || e.source,
       sourceHandle: e.sourceHandle || 'default',
@@ -217,7 +234,12 @@ export default function WorkflowAIDialog({ currentNodes, currentEdges, channel, 
     }));
 
     onApply(newNodes, newEdges);
-    showNotification(`Đã thêm ${newNodes.length} node từ AI - nhớ Lưu!`, 'success');
+    showNotification(
+      skippedNodeCount > 0
+        ? `Đã thêm ${newNodes.length} node từ AI; bỏ qua ${skippedNodeCount} node không còn khả dụng. Nhớ Lưu!`
+        : `Đã thêm ${newNodes.length} node từ AI - nhớ Lưu!`,
+      skippedNodeCount > 0 ? 'warning' : 'success',
+    );
     onClose();
   };
 

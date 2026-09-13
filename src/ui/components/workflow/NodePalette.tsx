@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { NODE_GROUPS } from './workflowConfig';
+import { AVAILABLE_NODE_GROUPS } from './workflowConfig';
 import { Channel } from '../../../configs/channelConfig';
 
 const GROUP_ACCENT: Record<string, string> = {
@@ -52,7 +52,7 @@ export default function NodePalette({ channel }: Props) {
     return false;
   };
 
-  const filtered = NODE_GROUPS.map(g => ({
+  const filtered = AVAILABLE_NODE_GROUPS.map(g => ({
     ...g,
     items: g.items.filter(n =>
       channelFilter(n) &&

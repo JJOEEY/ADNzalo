@@ -278,7 +278,19 @@ class CRMQueueService {
             const { blocks: allBlocks, mode: parsedMode } = parseContentBlocks(item.template_message || '');
             sendMode = parsedMode;
 
-            if (sendMode === 'random') {
+            let assignedBlock: ContentBlock | null = null;
+            // Phone contacts are rewritten to their resolved UID above, so use
+            // that stable id to find the sidecar assignment on the first send.
+            const assignment = db.getCampaignScriptAssignment(item.campaign_id, effectiveContactId);
+            if (assignment?.variant_snapshot) {
+                try { assignedBlock = JSON.parse(assignment.variant_snapshot) as ContentBlock; } catch { /* old DB row */ }
+            }
+
+            if (assignedBlock) {
+                // The exact block snapshot is fixed when this contact joins the
+                // experiment, even after retry or later campaign edits.
+                blocksToSend = [assignedBlock];
+            } else if (sendMode === 'random') {
                 const idx = allBlocks.length > 0 ? Math.floor(Math.random() * allBlocks.length) : 0;
                 blocksToSend = allBlocks.length > 0 ? [allBlocks[idx]] : [];
             } else {

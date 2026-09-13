@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import { app, safeStorage } from 'electron';
 import Logger from '../../utils/Logger';
 import BetterSqlite3 from 'better-sqlite3';
-import type { Account, Message, Contact, CRMNote, CRMCampaign, CRMCampaignContact, CRMSendLog, CRMCampaignStatus, CRMContactStatus } from '../../models';
+import type { Account, Message, Contact, CRMNote, CRMCampaign, CRMCampaignContact, CRMSendLog, CRMCampaignScriptExperimentInput, CRMCampaignScriptReportRow, CRMCampaignStatus, CRMContactStatus } from '../../models';
 import type { TelegramPeer } from '../../models/telegram';
 import { CHANNEL } from '../../ui/lib/channelHelper';
 import { getTelegramMessagePreview } from '../telegram/TelegramMessagePreview';
@@ -852,6 +852,58 @@ class DatabaseService {
         try { this.exec(`ALTER TABLE crm_campaign_contacts ADD COLUMN phone TEXT NOT NULL DEFAULT ''`); } catch {}
 
         this.exec(`
+            CREATE TABLE IF NOT EXISTS crm_script_rule_versions (
+                owner_zalo_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                rules_text TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY(owner_zalo_id, version)
+            );
+        `);
+
+        this.exec(`
+            CREATE TABLE IF NOT EXISTS crm_campaign_script_experiments (
+                campaign_id INTEGER NOT NULL,
+                owner_zalo_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                rules_version INTEGER NOT NULL DEFAULT 0,
+                rules_snapshot TEXT NOT NULL DEFAULT '',
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(campaign_id, revision),
+                FOREIGN KEY(campaign_id) REFERENCES crm_campaigns(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_crm_script_experiments_owner
+                ON crm_campaign_script_experiments(owner_zalo_id, campaign_id, revision);
+
+            CREATE TABLE IF NOT EXISTS crm_campaign_script_variants (
+                campaign_id INTEGER NOT NULL,
+                revision INTEGER NOT NULL,
+                variant_id TEXT NOT NULL,
+                variant_label TEXT NOT NULL DEFAULT '',
+                variant_snapshot TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY(campaign_id, revision, variant_id),
+                FOREIGN KEY(campaign_id, revision)
+                    REFERENCES crm_campaign_script_experiments(campaign_id, revision) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS crm_campaign_script_assignments (
+                campaign_id INTEGER NOT NULL,
+                contact_id TEXT NOT NULL,
+                owner_zalo_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                variant_id TEXT NOT NULL,
+                assigned_at INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(campaign_id, contact_id),
+                FOREIGN KEY(campaign_id, revision, variant_id)
+                    REFERENCES crm_campaign_script_variants(campaign_id, revision, variant_id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_crm_script_assignments_sender
+                ON crm_campaign_script_assignments(campaign_id, revision, owner_zalo_id, variant_id);
+        `);
+        this.migrateLegacyCampaignScriptData();
+
+        this.exec(`
             CREATE TABLE IF NOT EXISTS crm_send_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 owner_zalo_id TEXT NOT NULL,
@@ -885,6 +937,7 @@ class DatabaseService {
                 stage TEXT NOT NULL DEFAULT 'new',
                 owner_employee TEXT NOT NULL DEFAULT '',
                 deal_value REAL NOT NULL DEFAULT 0,
+                attributed_campaign_id INTEGER DEFAULT NULL,
                 created_at INTEGER NOT NULL DEFAULT 0,
                 updated_at INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(owner_zalo_id, contact_id)
@@ -892,6 +945,7 @@ class DatabaseService {
             CREATE INDEX IF NOT EXISTS idx_client_pool_owner ON client_pool(owner_zalo_id, stage, updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_client_pool_emp ON client_pool(owner_employee);
         `);
+        try { this.exec(`ALTER TABLE client_pool ADD COLUMN attributed_campaign_id INTEGER DEFAULT NULL`); } catch {}
         this.exec(`
             CREATE TABLE IF NOT EXISTS client_stage_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1001,6 +1055,36 @@ class DatabaseService {
         `);
 
         // ─── AI Assistants ────────────────────���───────────────────────────────
+        // Removed commerce integrations: preserve records/workflow JSON for history,
+        // but revoke credentials and pause workflows that can no longer run safely.
+        try { this.exec(`ALTER TABLE workflows ADD COLUMN disabled_reason TEXT NOT NULL DEFAULT ''`); } catch {}
+        try {
+            const commerceProviders = ['kiotviet', 'haravan', 'sapo', 'nhanh', 'pancake', 'casso', 'sepay', 'ghn', 'ghtk'];
+            const placeholders = commerceProviders.map(() => '?').join(',');
+            this.run(
+                `UPDATE integrations SET enabled=0, credentials_encrypted='{}', connected_at=NULL, updated_at=? WHERE lower(type) IN (${placeholders})`,
+                [Date.now(), ...commerceProviders],
+            );
+
+            const workflows = this.query<any>(`SELECT id, nodes_json FROM workflows WHERE enabled<>0`);
+            for (const workflow of workflows) {
+                let nodes: any[] = [];
+                try { nodes = JSON.parse(workflow.nodes_json || '[]'); } catch { continue; }
+                const removedNode = nodes.find(node => {
+                    const type = String(node?.type || '').toLowerCase();
+                    return type === 'trigger.payment' || type.startsWith('payment.') ||
+                        ['kiotviet.', 'haravan.', 'sapo.', 'nhanh.', 'pancake.', 'ghn.', 'ghtk.'].some(prefix => type.startsWith(prefix));
+                });
+                if (removedNode) {
+                    const reason = `Tạm dừng vì workflow phụ thuộc node commerce đã gỡ (${removedNode.type || 'commerce'}).`;
+                    this.run(`UPDATE workflows SET enabled=0, disabled_reason=?, updated_at=? WHERE id=?`, [reason, Date.now(), workflow.id]);
+                }
+            }
+            this.save();
+        } catch (err: any) {
+            Logger.warn(`[DatabaseService] commerce deactivation migration: ${err.message}`);
+        }
+
         this.exec(`
             CREATE TABLE IF NOT EXISTS ai_assistants (
                 id                    TEXT PRIMARY KEY,
@@ -5579,24 +5663,37 @@ class DatabaseService {
     public upsertClientPoolEntry(e: {
         owner_zalo_id: string; contact_id: string; contact_type?: string; display_name?: string;
         stage?: string; owner_employee?: string; deal_value?: number; changed_by?: string;
+        attributed_campaign_id?: number | null;
     }): number {
         if (!this.initialized || !e.owner_zalo_id || !e.contact_id) return 0;
         try {
             const now = Date.now();
             const existing = this.query<any>(
-                `SELECT id, stage FROM client_pool WHERE owner_zalo_id=? AND contact_id=?`,
+                `SELECT id, stage, attributed_campaign_id FROM client_pool WHERE owner_zalo_id=? AND contact_id=?`,
                 [e.owner_zalo_id, e.contact_id],
             )[0];
+            const assignedCampaign = e.attributed_campaign_id === undefined
+                ? existing?.attributed_campaign_id ?? null
+                : e.attributed_campaign_id;
+            if (assignedCampaign != null) {
+                const validCampaign = this.queryOne<any>(
+                    `SELECT 1 FROM crm_campaigns WHERE id=? AND owner_zalo_id=?`,
+                    [Number(assignedCampaign), e.owner_zalo_id],
+                );
+                if (!validCampaign) return 0;
+            }
+            const resultingStage = e.stage || existing?.stage || 'new';
+            if (resultingStage === 'closed' && !assignedCampaign && (!existing || e.stage === 'closed')) return 0;
             if (!existing) {
                 const id = this.runInsert(
-                    `INSERT INTO client_pool (owner_zalo_id, contact_id, contact_type, display_name, stage, owner_employee, deal_value, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+                    `INSERT INTO client_pool (owner_zalo_id, contact_id, contact_type, display_name, stage, owner_employee, deal_value, attributed_campaign_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
                     [e.owner_zalo_id, e.contact_id, e.contact_type || 'user', e.display_name || '',
-                     e.stage || 'new', e.owner_employee || '', Number(e.deal_value || 0), now, now],
+                     resultingStage, e.owner_employee || '', Number(e.deal_value || 0), assignedCampaign, now, now],
                 );
-                if ((e.stage || 'new') !== 'new') {
+                if (resultingStage !== 'new') {
                     this.run(
                         `INSERT INTO client_stage_history (owner_zalo_id, contact_id, from_stage, to_stage, changed_by, note, created_at) VALUES (?,?,?,?,?,?,?)`,
-                        [e.owner_zalo_id, e.contact_id, 'new', e.stage, e.changed_by || '', '', now],
+                        [e.owner_zalo_id, e.contact_id, 'new', resultingStage, e.changed_by || '', '', now],
                     );
                 }
                 return id;
@@ -5608,6 +5705,7 @@ class DatabaseService {
             if (e.owner_employee !== undefined) { sets.push('owner_employee=?'); vals.push(e.owner_employee); }
             if (e.deal_value !== undefined) { sets.push('deal_value=?'); vals.push(Number(e.deal_value)); }
             if (e.stage) { sets.push('stage=?'); vals.push(e.stage); }
+            if (e.attributed_campaign_id !== undefined) { sets.push('attributed_campaign_id=?'); vals.push(assignedCampaign); }
             vals.push(existing.id);
             this.run(`UPDATE client_pool SET ${sets.join(',')} WHERE id=?`, vals);
             if (e.stage && e.stage !== existing.stage) {
@@ -5625,10 +5723,11 @@ class DatabaseService {
         try {
             return this.transaction(() => {
                 const row = this.query<any>(
-                    `SELECT id, stage FROM client_pool WHERE owner_zalo_id=? AND contact_id=?`,
+                    `SELECT id, stage, attributed_campaign_id FROM client_pool WHERE owner_zalo_id=? AND contact_id=?`,
                     [ownerZaloId, contactId],
                 )[0];
                 if (!row || row.stage === toStage) return false;
+                if (toStage === 'closed' && !row.attributed_campaign_id) return false;
                 const now = Date.now();
                 this.run(`UPDATE client_pool SET stage=?, updated_at=? WHERE id=?`, [toStage, now, row.id]);
                 this.run(
@@ -5676,6 +5775,224 @@ class DatabaseService {
     }
 
     /** Campaigns */
+    public getCRMCommonScriptRules(ownerZaloId: string): { version: number; rules_text: string; created_at: number } {
+        const empty = { version: 0, rules_text: '', created_at: 0 };
+        if (!this.initialized || !ownerZaloId) return empty;
+        try {
+            return this.queryOne<any>(
+                `SELECT version, rules_text, created_at FROM crm_script_rule_versions WHERE owner_zalo_id=? ORDER BY version DESC LIMIT 1`,
+                [ownerZaloId],
+            ) || empty;
+        } catch (err: any) { Logger.error(`[DB] getCRMCommonScriptRules: ${err.message}`); return empty; }
+    }
+
+    public saveCRMCommonScriptRules(ownerZaloId: string, rulesText: string): { version: number; rules_text: string; created_at: number } | null {
+        if (!this.initialized || !ownerZaloId || !rulesText.trim() || rulesText.length > 10000) return null;
+        try {
+            const version = Number(this.queryOne<any>(
+                `SELECT COALESCE(MAX(version),0)+1 AS version FROM crm_script_rule_versions WHERE owner_zalo_id=?`,
+                [ownerZaloId],
+            )?.version || 1);
+            const createdAt = Date.now();
+            this.run(
+                `INSERT INTO crm_script_rule_versions(owner_zalo_id, version, rules_text, created_at) VALUES(?,?,?,?)`,
+                [ownerZaloId, version, rulesText.trim(), createdAt],
+            );
+            return { version, rules_text: rulesText.trim(), created_at: createdAt };
+        } catch (err: any) { Logger.error(`[DB] saveCRMCommonScriptRules: ${err.message}`); return null; }
+    }
+
+    private migrateLegacyCampaignScriptData(): void {
+        try {
+            const campaignColumns = new Set(this.query<any>(`PRAGMA table_info(crm_campaigns)`).map(row => String(row.name)));
+            if (!['script_rules_snapshot', 'script_rules_version'].every(column => campaignColumns.has(column))) return;
+            const contactColumns = new Set(this.query<any>(`PRAGMA table_info(crm_campaign_contacts)`).map(row => String(row.name)));
+            const hasLegacyAssignments = [
+                'variant_id', 'variant_label', 'variant_snapshot', 'variant_rules_version', 'variant_rules_snapshot',
+            ].every(column => contactColumns.has(column));
+            if (!hasLegacyAssignments) return;
+            const assignments = this.query<any>(
+                `SELECT cc.campaign_id, cc.owner_zalo_id, cc.contact_id, cc.variant_id, cc.variant_label,
+                        cc.variant_snapshot, cc.variant_rules_version, cc.variant_rules_snapshot,
+                        c.owner_zalo_id AS campaign_owner
+                 FROM crm_campaign_contacts cc JOIN crm_campaigns c ON c.id=cc.campaign_id
+                 WHERE COALESCE(cc.variant_id,'')<>''`,
+            );
+            for (const row of assignments) {
+                const rulesVersion = Number(row.variant_rules_version || 0);
+                const revision = Math.max(1, rulesVersion);
+                const rulesSnapshot = row.variant_rules_snapshot || '';
+                this.runNoSave(
+                    `INSERT OR IGNORE INTO crm_campaign_script_experiments
+                     (campaign_id, owner_zalo_id, revision, rules_version, rules_snapshot, created_at)
+                     VALUES (?,?,?,?,?,?)`,
+                    [row.campaign_id, row.campaign_owner, revision, rulesVersion, rulesSnapshot, Date.now()],
+                );
+                if (row.variant_snapshot) {
+                    this.runNoSave(
+                        `INSERT OR IGNORE INTO crm_campaign_script_variants
+                         (campaign_id, revision, variant_id, variant_label, variant_snapshot) VALUES (?,?,?,?,?)`,
+                        [row.campaign_id, revision, row.variant_id, row.variant_label || 'Biến thể', row.variant_snapshot],
+                    );
+                    this.runNoSave(
+                        `INSERT OR IGNORE INTO crm_campaign_script_assignments
+                         (campaign_id, contact_id, owner_zalo_id, revision, variant_id, assigned_at)
+                         VALUES (?,?,?,?,?,?)`,
+                        [row.campaign_id, row.contact_id, row.owner_zalo_id, revision, row.variant_id, Date.now()],
+                    );
+                }
+            }
+        } catch (err: any) {
+            Logger.warn(`[DatabaseService] legacy campaign script migration warning: ${err.message}`);
+        }
+    }
+
+    public saveCRMCampaignScriptExperiment(
+        ownerZaloId: string,
+        campaignId: number,
+        experiment: CRMCampaignScriptExperimentInput,
+    ): number {
+        if (!this.initialized || !ownerZaloId || !campaignId || !experiment) return 0;
+        const rulesSnapshot = String(experiment.rulesSnapshot || '').trim();
+        const variants = Array.isArray(experiment.variants) ? experiment.variants : [];
+        if (!rulesSnapshot || rulesSnapshot.length > 20000) return 0;
+        if (experiment.active ? variants.length < 2 || variants.length > 5 : variants.length !== 0) return 0;
+        const normalized = variants.map(variant => {
+            let parsed: any = null;
+            try { parsed = JSON.parse(variant.snapshot || ''); } catch { return null; }
+            if (!variant.id?.trim() || !String(parsed?.text || '').trim()) return null;
+            return {
+                id: variant.id.trim(),
+                label: String(variant.label || '').trim() || 'Biến thể',
+                snapshot: JSON.stringify(parsed),
+            };
+        });
+        if (normalized.some(variant => !variant) || new Set(normalized.map(variant => variant!.id)).size !== normalized.length) return 0;
+        const campaign = this.getCRMCampaign(campaignId);
+        if (!campaign || (campaign.owner_zalo_id !== ownerZaloId && !this.getCampaignSenderIds(campaignId).includes(ownerZaloId))) return 0;
+        const campaignOwner = campaign.owner_zalo_id;
+
+        try {
+            const revision = this.transaction(() => {
+                const nextRevision = Number(this.queryOne<any>(
+                    `SELECT COALESCE(MAX(revision),0)+1 AS revision FROM crm_campaign_script_experiments WHERE campaign_id=?`,
+                    [campaignId],
+                )?.revision || 1);
+                this.runNoSave(
+                    `INSERT INTO crm_campaign_script_experiments
+                     (campaign_id, owner_zalo_id, revision, rules_version, rules_snapshot, active, created_at)
+                     VALUES (?,?,?,?,?,?,?)`,
+                    [campaignId, campaignOwner, nextRevision, Math.max(0, Number(experiment.rulesVersion || 0)), rulesSnapshot, experiment.active ? 1 : 0, Date.now()],
+                );
+                const variantInsert = db!.prepare(
+                    `INSERT INTO crm_campaign_script_variants
+                     (campaign_id, revision, variant_id, variant_label, variant_snapshot) VALUES (?,?,?,?,?)`,
+                );
+                for (const variant of normalized as Array<{ id: string; label: string; snapshot: string }>) {
+                    variantInsert.run(campaignId, nextRevision, variant.id, variant.label, variant.snapshot);
+                }
+                if (experiment.active) {
+                    const pending = this.query<any>(
+                        `SELECT owner_zalo_id, contact_id FROM crm_campaign_contacts
+                         WHERE campaign_id=? AND status='pending' AND COALESCE(sent_at,0)=0 ORDER BY id`,
+                        [campaignId],
+                    );
+                    this.assignCampaignScriptVariants(campaignId, nextRevision, normalized as Array<{ id: string; label: string; snapshot: string }>, pending);
+                }
+                return nextRevision;
+            });
+            return revision;
+        } catch (err: any) {
+            Logger.error(`[DB] saveCRMCampaignScriptExperiment: ${err.message}`);
+            return 0;
+        }
+    }
+
+    private assignCampaignScriptVariants(
+        campaignId: number,
+        revision: number,
+        variants: Array<{ id: string; label: string; snapshot: string }>,
+        targets: Array<{ owner_zalo_id: string; contact_id: string }>,
+    ): void {
+        if (!variants.length || !targets.length) return;
+        const countsBySender = new Map<string, Map<string, number>>();
+        for (const row of this.query<any>(
+            `SELECT owner_zalo_id, variant_id, COUNT(*) AS n FROM crm_campaign_script_assignments
+             WHERE campaign_id=? AND revision=? GROUP BY owner_zalo_id, variant_id`,
+            [campaignId, revision],
+        )) {
+            if (!countsBySender.has(row.owner_zalo_id)) countsBySender.set(row.owner_zalo_id, new Map());
+            countsBySender.get(row.owner_zalo_id)!.set(row.variant_id, Number(row.n || 0));
+        }
+        const insert = db!.prepare(
+            `INSERT OR IGNORE INTO crm_campaign_script_assignments
+             (campaign_id, contact_id, owner_zalo_id, revision, variant_id, assigned_at) VALUES (?,?,?,?,?,?)`,
+        );
+        for (const target of targets) {
+            if (!target.contact_id || this.queryOne<any>(
+                `SELECT 1 FROM crm_campaign_script_assignments WHERE campaign_id=? AND contact_id=?`,
+                [campaignId, target.contact_id],
+            )) continue;
+            const sender = target.owner_zalo_id || '';
+            const counts = countsBySender.get(sender) || new Map<string, number>();
+            const minimum = Math.min(...variants.map(variant => counts.get(variant.id) || 0));
+            const available = variants.filter(variant => (counts.get(variant.id) || 0) === minimum);
+            const picked = available[Math.floor(Math.random() * available.length)];
+            const result = insert.run(campaignId, target.contact_id, sender, revision, picked.id, Date.now());
+            if (result.changes) counts.set(picked.id, (counts.get(picked.id) || 0) + 1);
+            countsBySender.set(sender, counts);
+        }
+    }
+
+    private getLatestCampaignScriptExperiment(campaignId: number, ownerZaloId?: string): {
+        revision: number; rules_version: number; rules_snapshot: string; active: boolean;
+        variants: Array<{ id: string; label: string; snapshot: string }>;
+    } | null {
+        const ownerFilter = ownerZaloId ? ` AND owner_zalo_id=?` : '';
+        const params = ownerZaloId ? [campaignId, ownerZaloId] : [campaignId];
+        const experiment = this.queryOne<any>(
+            `SELECT revision, rules_version, rules_snapshot, active FROM crm_campaign_script_experiments
+             WHERE campaign_id=?${ownerFilter} ORDER BY revision DESC LIMIT 1`, params,
+        );
+        if (!experiment) return null;
+        const variants = this.query<any>(
+            `SELECT variant_id AS id, variant_label AS label, variant_snapshot AS snapshot
+             FROM crm_campaign_script_variants WHERE campaign_id=? AND revision=? ORDER BY rowid`,
+            [campaignId, experiment.revision],
+        );
+        return { ...experiment, active: Number(experiment.active) === 1, variants };
+    }
+
+    public getCRMCampaignScriptExperiment(ownerZaloId: string, campaignId: number): {
+        revision: number; rules_version: number; rules_snapshot: string; active: boolean;
+        variants: Array<{ id: string; label: string; snapshot: string }>;
+    } | null {
+        if (!this.initialized || !ownerZaloId) return null;
+        const campaign = this.getCRMCampaign(campaignId);
+        if (!campaign || (campaign.owner_zalo_id !== ownerZaloId && !this.getCampaignSenderIds(campaignId).includes(ownerZaloId))) return null;
+        return this.getLatestCampaignScriptExperiment(campaignId, campaign.owner_zalo_id);
+    }
+
+    public getCampaignScriptAssignment(campaignId: number, contactId: string): {
+        variant_id: string; variant_label: string; variant_snapshot: string;
+        rules_version: number; rules_snapshot: string;
+    } | null {
+        if (!this.initialized || !campaignId || !contactId) return null;
+        try {
+            return this.queryOne<any>(
+                `SELECT a.variant_id, v.variant_label, v.variant_snapshot,
+                        e.rules_version, e.rules_snapshot
+                 FROM crm_campaign_script_assignments a
+                 JOIN crm_campaign_script_variants v
+                   ON v.campaign_id=a.campaign_id AND v.revision=a.revision AND v.variant_id=a.variant_id
+                 JOIN crm_campaign_script_experiments e
+                   ON e.campaign_id=a.campaign_id AND e.revision=a.revision
+                 WHERE a.campaign_id=? AND a.contact_id=?`,
+                [campaignId, contactId],
+            ) || null;
+        } catch (err: any) { Logger.error(`[DB] getCampaignScriptAssignment: ${err.message}`); return null; }
+    }
+
     public getCRMCampaigns(ownerZaloId: string): CRMCampaign[] {
         if (!this.initialized) return [];
         try {
@@ -5684,7 +6001,11 @@ class DatabaseService {
             todayStart.setHours(0, 0, 0, 0);
             const todayStartMs = todayStart.getTime();
             const rows = this.query<any>(
-                `SELECT c.*,
+                `SELECT c.id, c.owner_zalo_id, c.channel, c.name, c.template_message,
+                    c.friend_request_message, c.campaign_type, c.mixed_config, c.status,
+                    c.delay_seconds, c.delay_min_seconds, c.delay_max_seconds,
+                    c.per_contact_delay_min_seconds, c.per_contact_delay_max_seconds,
+                    c.daily_send_limit, c.daily_start_time, c.created_at, c.updated_at,
                     (SELECT COUNT(*) FROM crm_campaign_contacts cc WHERE cc.campaign_id=c.id) as total_contacts,
                     (SELECT COUNT(*) FROM crm_campaign_contacts cc WHERE cc.campaign_id=c.id AND cc.status='sent') as sent_count,
                     (SELECT COUNT(*) FROM crm_campaign_contacts cc WHERE cc.campaign_id=c.id AND cc.status='pending') as pending_count,
@@ -5705,7 +6026,11 @@ class DatabaseService {
     public getCRMCampaign(campaignId: number): CRMCampaign | null {
         if (!this.initialized) return null;
         try {
-            const rows = this.query<any>(`SELECT * FROM crm_campaigns WHERE id=?`, [campaignId]);
+            const rows = this.query<any>(`SELECT id, owner_zalo_id, channel, name, template_message,
+                friend_request_message, campaign_type, mixed_config, status, delay_seconds,
+                delay_min_seconds, delay_max_seconds, per_contact_delay_min_seconds,
+                per_contact_delay_max_seconds, daily_send_limit, daily_start_time, created_at, updated_at
+                FROM crm_campaigns WHERE id=?`, [campaignId]);
             return rows[0] ? { ...rows[0], sender_zalo_ids: this.getCampaignSenderIds(campaignId) } : null;
         } catch (err: any) { Logger.error(`[DB] getCRMCampaign: ${err.message}`); return null; }
     }
@@ -5779,16 +6104,21 @@ class DatabaseService {
         } catch { return []; }
     }
 
-    public updateCRMCampaignStatus(campaignId: number, status: CRMCampaignStatus): void {
-        if (!this.initialized) return;
-        try { this.run(`UPDATE crm_campaigns SET status=?, updated_at=? WHERE id=?`, [status, Date.now(), campaignId]); }
-        catch (err: any) { Logger.error(`[DB] updateCRMCampaignStatus: ${err.message}`); }
+    public updateCRMCampaignStatus(campaignId: number, status: CRMCampaignStatus): boolean {
+        if (!this.initialized) return false;
+        try {
+            this.run(`UPDATE crm_campaigns SET status=?, updated_at=? WHERE id=?`, [status, Date.now(), campaignId]);
+            return true;
+        } catch (err: any) { Logger.error(`[DB] updateCRMCampaignStatus: ${err.message}`); return false; }
     }
 
     public deleteCRMCampaign(campaignId: number, ownerZaloId: string): void {
         if (!this.initialized) return;
         try {
             this.runNoSave(`DELETE FROM crm_campaign_accounts WHERE campaign_id=?`, [campaignId]);
+            this.runNoSave(`DELETE FROM crm_campaign_script_assignments WHERE campaign_id=?`, [campaignId]);
+            this.runNoSave(`DELETE FROM crm_campaign_script_variants WHERE campaign_id=?`, [campaignId]);
+            this.runNoSave(`DELETE FROM crm_campaign_script_experiments WHERE campaign_id=?`, [campaignId]);
             this.runNoSave(`DELETE FROM crm_campaign_contacts WHERE campaign_id=?`, [campaignId]);
             this.runNoSave(`DELETE FROM crm_campaigns WHERE id=? AND owner_zalo_id=?`, [campaignId, ownerZaloId]);
             this.save();
@@ -5800,6 +6130,7 @@ class DatabaseService {
         try {
             const orig = this.getCRMCampaign(campaignId);
             if (!orig) { Logger.warn(`[DB] cloneCRMCampaign: campaign ${campaignId} not found`); return 0; }
+            const originalExperiment = this.getLatestCampaignScriptExperiment(campaignId, orig.owner_zalo_id);
 
             const newId = this.saveCRMCampaign({
                 ...orig,
@@ -5810,33 +6141,26 @@ class DatabaseService {
             });
             if (!newId) { Logger.warn(`[DB] cloneCRMCampaign: saveCRMCampaign returned 0`); return 0; }
 
+            if (originalExperiment) {
+                this.saveCRMCampaignScriptExperiment(ownerZaloId, newId, {
+                    rulesVersion: originalExperiment.rules_version,
+                    rulesSnapshot: originalExperiment.rules_snapshot,
+                    active: originalExperiment.active,
+                    variants: originalExperiment.variants,
+                });
+            }
+
             if (includeContacts) {
                 const contacts = this.getCampaignContacts(campaignId);
                 if (contacts.length > 0) {
-                    // Batch insert via a prepared statement to avoid per-row save() calls
-                    const stmt = db!.prepare(
-                        `INSERT OR IGNORE INTO crm_campaign_contacts
-                         (campaign_id, owner_zalo_id, contact_id, display_name, avatar, status, sent_at, retry_count, error)
-                         VALUES (?,?,?,?,?,?,?,?,?)`
-                    );
-                    // Re-distribute targets round-robin across the clone's senders so a
-                    // copy made under a different sender set keeps balanced queues.
-                    const senders = this.getCampaignSenderIds(newId);
-                    for (let i = 0; i < contacts.length; i++) {
-                        const c = contacts[i];
-                        const sender = senders.length > 0 ? senders[i % senders.length] : ownerZaloId;
-                        stmt.run(
-                            newId,
-                            sender,
-                            c.contact_id ?? '',
-                            c.display_name ?? '',
-                            c.avatar ?? '',
-                            'pending',  // luôn reset về pending khi clone
-                            0,          // sent_at
-                            0,          // retry_count
-                            '',         // error
-                        );
-                    }
+                    // Re-run assignment for the cloned experiment instead of carrying
+                    // delivery state or stale variant attribution from the source.
+                    this.addCampaignContacts(newId, ownerZaloId, contacts.map(c => ({
+                        contactId: c.contact_id ?? '',
+                        displayName: c.display_name ?? '',
+                        avatar: c.avatar ?? '',
+                        phone: c.phone ?? '',
+                    })));
                     Logger.log(`[DB] cloneCRMCampaign: copied ${contacts.length} contacts to campaign ${newId}`);
                 }
             }
@@ -5848,15 +6172,22 @@ class DatabaseService {
     public addCampaignContacts(campaignId: number, ownerZaloId: string, contacts: Array<{ contactId: string; displayName?: string; avatar?: string; phone?: string }>): void {
         if (!this.initialized || !contacts.length) return;
         try {
+            if (!this.getCRMCampaign(campaignId)) return;
             const stmt = db!.prepare(
                 `INSERT OR IGNORE INTO crm_campaign_contacts (campaign_id, owner_zalo_id, contact_id, display_name, avatar, phone, status, sent_at, retry_count, error) VALUES (?,?,?,?,?,?,'pending',0,0,'')`
             );
             const senders = this.getCampaignSenderIds(campaignId);
+            const targetsToAssign: Array<{ owner_zalo_id: string; contact_id: string }> = [];
             for (let i = 0; i < contacts.length; i++) {
                 const c = contacts[i];
                 // One delivery per target, distributed evenly across selected senders.
                 const sender = senders.length > 0 ? senders[i % senders.length] : ownerZaloId;
-                stmt.run(campaignId, sender, c.contactId, c.displayName || '', c.avatar || '', c.phone || '');
+                const result = stmt.run(campaignId, sender, c.contactId, c.displayName || '', c.avatar || '', c.phone || '');
+                if (result.changes) targetsToAssign.push({ owner_zalo_id: sender, contact_id: c.contactId });
+            }
+            const experiment = this.getLatestCampaignScriptExperiment(campaignId);
+            if (experiment) {
+                this.assignCampaignScriptVariants(campaignId, experiment.revision, experiment.variants, targetsToAssign);
             }
             this.save();
         } catch (err: any) { Logger.error(`[DB] addCampaignContacts: ${err.message}`); }
@@ -5865,7 +6196,8 @@ class DatabaseService {
     public getCampaignContacts(campaignId: number): CRMCampaignContact[] {
         if (!this.initialized) return [];
         try {
-            return this.query<any>(`SELECT * FROM crm_campaign_contacts WHERE campaign_id=? ORDER BY id`, [campaignId]);
+            return this.query<any>(`SELECT id, campaign_id, owner_zalo_id, contact_id, display_name, avatar, phone,
+                status, sent_at, retry_count, error FROM crm_campaign_contacts WHERE campaign_id=? ORDER BY id`, [campaignId]);
         } catch (err: any) { Logger.error(`[DB] getCampaignContacts: ${err.message}`); return []; }
     }
 
@@ -5873,6 +6205,7 @@ class DatabaseService {
         if (!this.initialized || !contactIds.length) return;
         try {
             const placeholders = contactIds.map(() => '?').join(',');
+            this.run(`DELETE FROM crm_campaign_script_assignments WHERE campaign_id=? AND contact_id IN (${placeholders})`, [campaignId, ...contactIds]);
             this.run(`DELETE FROM crm_campaign_contacts WHERE campaign_id=? AND contact_id IN (${placeholders})`, [campaignId, ...contactIds]);
             this.save();
         } catch (err: any) { Logger.error(`[DB] deleteCampaignContacts: ${err.message}`); }
@@ -5881,6 +6214,7 @@ class DatabaseService {
     public deleteAllCampaignContacts(campaignId: number): void {
         if (!this.initialized) return;
         try {
+            this.run(`DELETE FROM crm_campaign_script_assignments WHERE campaign_id=?`, [campaignId]);
             this.run(`DELETE FROM crm_campaign_contacts WHERE campaign_id=?`, [campaignId]);
             this.save();
         } catch (err: any) { Logger.error(`[DB] deleteAllCampaignContacts: ${err.message}`); }
@@ -5902,10 +6236,20 @@ class DatabaseService {
     public updateCampaignContactId(id: number, newContactId: string, displayName: string): void {
         if (!this.initialized) return;
         try {
-            this.run(
-                `UPDATE crm_campaign_contacts SET contact_id=?, display_name=? WHERE id=?`,
-                [newContactId, displayName, id]
-            );
+            const row = this.queryOne<any>(`SELECT campaign_id, contact_id FROM crm_campaign_contacts WHERE id=?`, [id]);
+            if (!row) return;
+            this.transaction(() => {
+                const existingTarget = this.queryOne<any>(
+                    `SELECT 1 FROM crm_campaign_script_assignments WHERE campaign_id=? AND contact_id=?`,
+                    [row.campaign_id, newContactId],
+                );
+                if (existingTarget) {
+                    this.runNoSave(`DELETE FROM crm_campaign_script_assignments WHERE campaign_id=? AND contact_id=?`, [row.campaign_id, row.contact_id]);
+                } else {
+                    this.runNoSave(`UPDATE crm_campaign_script_assignments SET contact_id=? WHERE campaign_id=? AND contact_id=?`, [newContactId, row.campaign_id, row.contact_id]);
+                }
+                this.runNoSave(`UPDATE crm_campaign_contacts SET contact_id=?, display_name=? WHERE id=?`, [newContactId, displayName, id]);
+            });
         } catch (err: any) { Logger.error(`[DB] updateCampaignContactId: ${err.message}`); }
     }
 
@@ -5929,10 +6273,12 @@ class DatabaseService {
         if (!this.initialized) return null;
         try {
             const rows = this.query<any>(
-                `SELECT cc.*, c.template_message, c.delay_seconds, c.delay_min_seconds, c.delay_max_seconds,
+                `SELECT cc.id, cc.campaign_id, cc.owner_zalo_id, cc.contact_id, cc.display_name, cc.avatar, cc.phone,
+                    cc.status, cc.sent_at, cc.retry_count, cc.error,
+                    c.template_message, c.delay_seconds, c.delay_min_seconds, c.delay_max_seconds,
                     c.per_contact_delay_min_seconds, c.per_contact_delay_max_seconds,
                     c.campaign_type, c.friend_request_message, c.mixed_config,
-                    COALESCE(cont.phone, fr.phone, '') as phone,
+                    COALESCE(cont.phone, fr.phone, cc.phone, '') as phone,
                     COALESCE(cont.contact_type, 'user') as contact_type
                  FROM crm_campaign_contacts cc
                  JOIN crm_campaigns c ON c.id=cc.campaign_id
@@ -5957,7 +6303,10 @@ class DatabaseService {
                     SELECT 1 FROM crm_campaign_accounts ca
                     WHERE ca.campaign_id=c.id AND ca.zalo_id=? AND ca.enabled=1
                  ))
-                 AND EXISTS (SELECT 1 FROM crm_campaign_contacts cc WHERE cc.campaign_id=c.id AND cc.owner_zalo_id=? AND cc.status='pending')
+                 AND EXISTS (
+                    SELECT 1 FROM crm_campaign_contacts cc
+                    WHERE cc.campaign_id=c.id AND cc.owner_zalo_id=? AND cc.status='pending'
+                 )
                  LIMIT 1`,
                 [ownerZaloId, ownerZaloId, ownerZaloId]
             );
@@ -6923,6 +7272,69 @@ class DatabaseService {
         }
     }
 
+    /** Variant-level CRM outcomes. Legacy contacts without an experiment assignment stay out of this report. */
+    public getCampaignVariantReport(zaloId: string): CRMCampaignScriptReportRow[] {
+        if (!this.initialized || !zaloId) return [];
+        try {
+            return this.query<any>(`
+                SELECT c.id AS campaign_id, c.name AS campaign_name,
+                    e.revision AS experiment_revision, e.rules_version, e.rules_snapshot,
+                    v.variant_id, v.variant_label,
+                    COUNT(DISTINCT a.contact_id) AS sample_size,
+                    COUNT(DISTINCT CASE WHEN cc.status='sent' AND cc.sent_at>0 THEN a.contact_id END) AS sent,
+                    COUNT(DISTINCT CASE WHEN cc.status='sent' AND cc.sent_at>0 AND EXISTS (
+                        SELECT 1 FROM messages m
+                        WHERE m.owner_zalo_id=cc.owner_zalo_id AND m.thread_id=cc.contact_id
+                          AND m.is_sent=0 AND m.timestamp>cc.sent_at
+                    ) THEN a.contact_id END) AS replied,
+                    COUNT(DISTINCT CASE WHEN cc.status='sent' AND cc.sent_at>0 AND EXISTS (
+                        SELECT 1 FROM client_stage_history h
+                        WHERE h.owner_zalo_id=c.owner_zalo_id AND h.contact_id=cc.contact_id
+                          AND h.to_stage='consulting' AND h.created_at>=cc.sent_at
+                    ) THEN a.contact_id END) AS consulting,
+                    COUNT(DISTINCT CASE WHEN cc.status='sent' AND cc.sent_at>0 AND p.stage='closed' AND p.attributed_campaign_id=c.id
+                        AND EXISTS (SELECT 1 FROM client_stage_history h
+                            WHERE h.owner_zalo_id=c.owner_zalo_id AND h.contact_id=cc.contact_id
+                              AND h.to_stage='closed' AND h.created_at>=cc.sent_at)
+                        THEN a.contact_id END) AS closed,
+                    COALESCE(SUM(CASE WHEN cc.status='sent' AND cc.sent_at>0 AND p.stage='closed' AND p.attributed_campaign_id=c.id
+                        AND EXISTS (SELECT 1 FROM client_stage_history h
+                            WHERE h.owner_zalo_id=c.owner_zalo_id AND h.contact_id=cc.contact_id
+                              AND h.to_stage='closed' AND h.created_at>=cc.sent_at)
+                        THEN p.deal_value ELSE 0 END),0) AS revenue
+                FROM crm_campaign_script_variants v
+                JOIN crm_campaign_script_experiments e ON e.campaign_id=v.campaign_id AND e.revision=v.revision
+                JOIN crm_campaigns c ON c.id=e.campaign_id
+                LEFT JOIN crm_campaign_script_assignments a
+                    ON a.campaign_id=v.campaign_id AND a.revision=v.revision AND a.variant_id=v.variant_id
+                LEFT JOIN crm_campaign_contacts cc ON cc.campaign_id=a.campaign_id AND cc.contact_id=a.contact_id
+                LEFT JOIN client_pool p ON p.owner_zalo_id=c.owner_zalo_id AND p.contact_id=a.contact_id
+                WHERE e.active=1 AND (c.owner_zalo_id=? OR EXISTS (
+                    SELECT 1 FROM crm_campaign_accounts ca WHERE ca.campaign_id=c.id AND ca.zalo_id=? AND ca.enabled=1
+                ))
+                GROUP BY c.id, e.revision, v.variant_id
+                ORDER BY c.created_at DESC, e.revision DESC, v.variant_label ASC
+            `, [zaloId, zaloId]).map((row: any) => ({
+                campaign_id: Number(row.campaign_id),
+                campaign_name: row.campaign_name || '',
+                experiment_revision: Number(row.experiment_revision || 0),
+                rules_version: Number(row.rules_version || 0),
+                variant_id: row.variant_id || '',
+                variant_label: row.variant_label || 'Biến thể',
+                rules_snapshot: row.rules_snapshot || '',
+                sample_size: Number(row.sample_size || 0),
+                sent: Number(row.sent || 0),
+                replied: Number(row.replied || 0),
+                consulting: Number(row.consulting || 0),
+                closed: Number(row.closed || 0),
+                revenue: Number(row.revenue || 0),
+            }));
+        } catch (err: any) {
+            Logger.error(`[DB] getCampaignVariantReport: ${err.message}`);
+            return [];
+        }
+    }
+
     /**
      * Friend request analytics: sent/received/accepted over time
      */
@@ -7176,17 +7588,23 @@ class DatabaseService {
             ? wf.pageIds.filter(Boolean).join(',')
             : (wf.pageId || '');
         const channel = this.normalizeWorkflowChannel(wf.channel);
+        const oldWorkflow = this.queryOne<any>(`SELECT disabled_reason FROM workflows WHERE id=?`, [wf.id]);
+        const removedCommerceNode = this.findRemovedCommerceWorkflowNode(wf.nodes || []);
+        const enabled = !!wf.enabled && !removedCommerceNode;
+        const disabledReason = removedCommerceNode
+            ? `Tạm dừng vì workflow còn node commerce đã gỡ (${removedCommerceNode}). Hãy xóa node này trước khi bật workflow.`
+            : enabled ? '' : (wf.disabledReason || oldWorkflow?.disabled_reason || '');
         this.run(
             `INSERT OR REPLACE INTO workflows
-             (id, name, description, enabled, channel, page_id, page_ids, nodes_json, edges_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (id, name, description, enabled, channel, page_id, page_ids, nodes_json, edges_json, created_at, updated_at, disabled_reason)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-                wf.id, wf.name, wf.description || '', wf.enabled ? 1 : 0,
+                wf.id, wf.name, wf.description || '', enabled ? 1 : 0,
                 channel,
                 pageIds,   // keep page_id in sync with first page for legacy compat
                 pageIds,
                 JSON.stringify(wf.nodes || []), JSON.stringify(wf.edges || []),
-                wf.createdAt || Date.now(), wf.updatedAt || Date.now(),
+                wf.createdAt || Date.now(), wf.updatedAt || Date.now(), disabledReason,
             ]
         );
     }
@@ -7202,12 +7620,30 @@ class DatabaseService {
         }
     }
 
-    public toggleWorkflow(id: string, enabled: boolean): void {
-        if (!this.initialized) return;
+    private findRemovedCommerceWorkflowNode(nodes: any[]): string | null {
+        const prefixes = ['kiotviet.', 'haravan.', 'sapo.', 'nhanh.', 'pancake.', 'payment.', 'ghn.', 'ghtk.'];
+        const node = (Array.isArray(nodes) ? nodes : []).find(item => {
+            const type = String(item?.type || '').toLowerCase();
+            return type === 'trigger.payment' || prefixes.some(prefix => type.startsWith(prefix));
+        });
+        return node ? String(node.type || 'commerce') : null;
+    }
+
+    public toggleWorkflow(id: string, enabled: boolean): boolean {
+        if (!this.initialized) return false;
         try {
-            this.run(`UPDATE workflows SET enabled=?, updated_at=? WHERE id=?`, [enabled ? 1 : 0, Date.now(), id]);
+            if (enabled) {
+                const row = this.queryOne<any>(`SELECT nodes_json FROM workflows WHERE id=?`, [id]);
+                if (!row) return false;
+                let nodes: any[] = [];
+                try { nodes = JSON.parse(row.nodes_json || '[]'); } catch { return false; }
+                if (this.findRemovedCommerceWorkflowNode(nodes)) return false;
+            }
+            this.run(`UPDATE workflows SET enabled=?, disabled_reason=CASE WHEN ?=1 THEN '' ELSE disabled_reason END, updated_at=? WHERE id=?`, [enabled ? 1 : 0, enabled ? 1 : 0, Date.now(), id]);
+            return true;
         } catch (err: any) {
             Logger.error(`[DB] toggleWorkflow: ${err.message}`);
+            return false;
         }
     }
 

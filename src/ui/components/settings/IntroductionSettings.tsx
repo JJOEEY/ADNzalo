@@ -10,9 +10,6 @@ type FeatureId =
   | 'messaging'
   | 'crm'
   | 'workflow'
-  | 'integration-pos'
-  | 'integration-payment'
-  | 'integration-shipping'
   | 'ai-assistant'
   | 'analytics'
   | 'erp'
@@ -35,9 +32,6 @@ const FEATURES: Feature[] = [
   { id: 'messaging',    icon: <ChatIcon className="w-4 h-4" />, label: 'Quản lý tin nhắn' },
   { id: 'crm',          icon: <UsersIcon className="w-4 h-4" />, label: 'CRM & Khách hàng' },
   { id: 'workflow',     icon: <LightningIcon className="w-4 h-4" />, label: 'Workflow tự động' },
-  { id: 'integration-pos', icon: <ShoppingCartIcon className="w-4 h-4" />, label: 'Tích hợp POS' },
-  { id: 'integration-payment', icon: <CreditCardIcon className="w-4 h-4" />, label: 'Tích hợp thanh toán' },
-  { id: 'integration-shipping', icon: <PackageIcon className="w-4 h-4" />, label: 'Tích hợp vận chuyển' },
   { id: 'ai-assistant', icon: <BotIcon className="w-4 h-4" />, label: 'Trợ lý AI' },
   { id: 'analytics',    icon: <TrendingUpIcon className="w-4 h-4" />, label: 'Báo cáo & Phân tích' },
   { id: 'erp',          icon: <FolderIcon className="w-4 h-4" />, label: 'ERP quản trị nội bộ' },
@@ -1858,7 +1852,7 @@ function DonateCoffeePanel() {
             { icon: <GlobeIcon className="w-4 h-4" />, title: 'Web app & API', desc: 'Backend Node.js, React, PHP,... database quản lý doanh nghiệp' },
             { icon: <BotIcon className="w-4 h-4" />, title: 'Tự động hoá & Bot', desc: 'Zalo bot, Facebook bot, Telegram bot, workflow automation' },
             { icon: <ChartIcon className="w-4 h-4" />, title: 'CRM & ERP', desc: 'Hệ thống quản lý khách hàng, nhân viên, bán hàng riêng' },
-            { icon: <PluginIcon className="w-4 h-4" />, title: 'Tích hợp API', desc: 'Kết nối POS, thanh toán, vận chuyển, webhook, third-party' },
+            { icon: <PluginIcon className="w-4 h-4" />, title: 'Kết nối API & Webhook', desc: 'Gửi request HTTP hoặc nhận dữ liệu webhook từ hệ thống bên ngoài' },
             { icon: <SmartphoneIcon className="w-4 h-4" />, title: 'AI & Chatbot', desc: 'Tích hợp GPT, Gemini, xử lý ngôn ngữ tự nhiên, phân loại' },
           ].map((item, i) => (
             <div key={i} className="bg-gray-700/30 rounded-lg p-2.5 border border-gray-600/30">
@@ -1930,9 +1924,6 @@ const PANEL_MAP = {
   messaging:    MessagingPanel,
   crm:          CrmPanel,
   workflow:     WorkflowPanel,
-  'integration-pos': IntegrationPOSPanel,
-  'integration-payment': IntegrationPaymentPanel,
-  'integration-shipping': IntegrationShippingPanel,
   'ai-assistant': AIAssistantPanel,
   analytics:    AnalyticsPanel,
   erp:          ErpPanel,
@@ -1950,7 +1941,9 @@ interface IntroductionSettingsProps {
 }
 
 export default function IntroductionSettings({ initialSubtab }: IntroductionSettingsProps = {}) {
-  const [activeFeature, setActiveFeature] = useState<FeatureId>(initialSubtab || 'overview');
+  const [activeFeature, setActiveFeature] = useState<FeatureId>(
+    initialSubtab && initialSubtab in PANEL_MAP ? initialSubtab : 'overview'
+  );
   const Panel = PANEL_MAP[activeFeature];
 
   // Listen for external subtab navigation events

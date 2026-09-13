@@ -35,7 +35,7 @@ interface CampaignDetailProps {
   localLabelThreadMap?: Record<string, number[]>;
   onStatusChange: (id: number, status: string) => void;
   onAddContacts: (campaignId: number, contacts: any[]) => Promise<void>;
-  onUpdate?: (data: { name: string; template_message: string; friend_request_message: string; campaign_type: string; delay_seconds: number }) => Promise<void>;
+  onUpdate?: (data: any) => Promise<number | void>;
 }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -356,6 +356,7 @@ export default function CampaignDetail({ campaign, zaloId, channel, allLabels, l
       {showEdit && (
         <CampaignCreateModal
           editMode
+          campaignId={campaign.id}
           zaloId={zaloId}
           channel={channel}
           initialData={{
@@ -374,10 +375,7 @@ export default function CampaignDetail({ campaign, zaloId, channel, allLabels, l
             sender_zalo_ids: campaign.sender_zalo_ids,
           }}
           onClose={() => setShowEdit(false)}
-          onSave={async (data) => {
-            await onUpdate?.(data);
-            setShowEdit(false);
-          }}
+          onSave={async (data) => await onUpdate?.(data)}
         />
       )}
 
