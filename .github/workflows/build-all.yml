@@ -49,7 +49,7 @@ jobs:
       tag: ${{ steps.get_tag.outputs.tag }}
       should_publish: ${{ steps.get_tag.outputs.should_publish }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: 🏷️ Resolve tag
         id: get_tag
         shell: bash
@@ -80,7 +80,7 @@ jobs:
 
     steps:
       - name: 📥 Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🟢 Setup Node.js 22.x
         uses: actions/setup-node@v4
@@ -133,7 +133,7 @@ jobs:
 
     steps:
       - name: 📥 Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🟢 Setup Node.js 22.x
         uses: actions/setup-node@v4
@@ -196,7 +196,7 @@ jobs:
 
     steps:
       - name: 📥 Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🟢 Setup Node.js 22.x
         uses: actions/setup-node@v4
